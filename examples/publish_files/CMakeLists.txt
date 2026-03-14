@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.10)
 
 project(sdk_exampes)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 
 option(OB_BUILD_PCL_EXAMPLES "Build Point Cloud Library examples" OFF)
 option(OB_BUILD_OPEN3D_EXAMPLES "Build Open3D examples" OFF)

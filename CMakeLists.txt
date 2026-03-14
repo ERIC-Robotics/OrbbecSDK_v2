@@ -23,8 +23,17 @@ else()
     set(OB_BUILD_DOCS OFF CACHE BOOL "Build api document and install doc" FORCE)
 endif()
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+#iceoryx required packages
+find_package(iceoryx_platform REQUIRED)
+find_package(iceoryx_posh CONFIG REQUIRED)
+find_package(iceoryx_hoofs CONFIG REQUIRED)
+
+include(IceoryxPackageHelper)
+include(IceoryxPlatform)
+include(IceoryxPlatformSettings)
 
 # check if current project is a sub project of other project
 if(OB_BUILD_MAIN_PROJECT)
@@ -75,8 +84,8 @@ if(OB_INSTALL_EXAMPLES_SOURCE AND OB_IS_MAIN_PROJECT)
     if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/examples/publish_files)
         file(READ ${CMAKE_CURRENT_SOURCE_DIR}/examples/publish_files/CMakeLists.txt ORIGINAL_CONTENT)
         string(REPLACE "OrbbecSDK" "${OB_SDK_LIB_NAME}" MODIFIED_CONTENT "${ORIGINAL_CONTENT}")
-        string(REPLACE "set(CMAKE_CXX_STANDARD 11)"
-            "set(CMAKE_CXX_STANDARD 11)\nset(OB_SDK_LIB_NAME \"${OB_SDK_LIB_NAME}\")"
+        string(REPLACE "set(CMAKE_CXX_STANDARD 14)"
+            "set(CMAKE_CXX_STANDARD 14)\nset(OB_SDK_LIB_NAME \"${OB_SDK_LIB_NAME}\")"
             MODIFIED_CONTENT "${MODIFIED_CONTENT}")
         file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/CMakeLists_modified.txt "${MODIFIED_CONTENT}")
         install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CMakeLists_modified.txt DESTINATION examples RENAME CMakeLists.txt)

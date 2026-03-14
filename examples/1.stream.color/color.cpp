@@ -1,50 +1,97 @@
-// Copyright (c) Orbbec Inc. All Rights Reserved.
-// Licensed under the MIT License.
+#include "libobsensor/ObSensor.hpp"
+#include <opencv2/opencv.hpp>
+#include <iostream>
+#include <chrono>
 
-#include <libobsensor/ObSensor.hpp>
+#include "iceoryx_posh/popo/untyped_publisher.hpp"
+#include "iceoryx_posh/popo/publisher_options.hpp"
+#include "iceoryx_posh/runtime/posh_runtime.hpp"
+#include "iceoryx_posh/capro/service_description.hpp"
+#include "iceoryx_hoofs/cxx/types.hpp"
 
-#include "utils.hpp"
-#include "utils_opencv.hpp"
+#include "color.hpp"
+int main() {
+    iox::runtime::PoshRuntime::initRuntime("ob_color_publisher");
 
-int main(void) try {
+    iox::popo::PublisherOptions pubOptions;
+    pubOptions.historyCapacity = 16U;  // Reduced to avoid exceeding the maximum limit (16)
 
-    // Create a pipeline with default device.
-    ob::Pipeline pipe;
+    iox::popo::UntypedPublisher publisher(iox::capro::ServiceDescription{ iox::capro::IdString_t(iox::cxx::TruncateToCapacity, "Orbbec"),
+                                                                          iox::capro::IdString_t(iox::cxx::TruncateToCapacity, "Camera"),
+                                                                          iox::capro::IdString_t(iox::cxx::TruncateToCapacity, "ColorStream") },
+                                          pubOptions);
 
-    // Configure which streams to enable or disable for the Pipeline by creating a Config.
-    std::shared_ptr<ob::Config> config = std::make_shared<ob::Config>();
+    try {
+        ob::Pipeline pipe;
+        auto         device = pipe.getDevice();
 
-    // Enable color video stream.
-    config->enableVideoStream(OB_STREAM_COLOR);
+        // ── Auto Controls OFF ────────────────────────────────────────
+        device->setBoolProperty(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, false);
+        device->setBoolProperty(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, false);
+        device->setIntProperty(OB_PROP_COLOR_BACKLIGHT_COMPENSATION_INT, 0);
+        device->setIntProperty(OB_PROP_COLOR_DENOISING_LEVEL_INT, 0);
 
-    // Start the pipeline with config.
-    pipe.start(config);
+        // ── Exposure & Gain ──────────────────────────────────────────
+        device->setIntProperty(OB_PROP_COLOR_EXPOSURE_INT, 65);
+        device->setIntProperty(OB_PROP_COLOR_GAIN_INT, 6);
 
-    // Create a window for rendering and set the resolution of the window.
-    ob_smpl::CVWindow win("Color");
+        // ── White Balance ────────────────────────────────────────────
+        device->setIntProperty(OB_PROP_COLOR_WHITE_BALANCE_INT, 4800);
 
-    while(win.run()) {
-        // Wait for up to 100ms for a frameset in blocking mode.
-        auto frameSet = pipe.waitForFrameset();
-        if(frameSet == nullptr) {
-            continue;
+        // ── Image Quality ────────────────────────────────────────────
+        device->setIntProperty(OB_PROP_COLOR_SHARPNESS_INT, 32);
+        device->setIntProperty(OB_PROP_COLOR_CONTRAST_INT, 47);
+
+        // ── Stream Config ────────────────────────────────────────────
+        auto config = std::make_shared<ob::Config>();
+        config->enableVideoStream(OB_SENSOR_COLOR, 640, 400, 90, OB_FORMAT_RGB);
+
+        pipe.start(config);
+
+        while(true) {
+            auto frameSet = pipe.waitForFrameset(1000);  // Increased timeout to 1000ms
+            if(!frameSet)
+                continue;
+
+            auto colorFrame = frameSet->getFrame(OB_FRAME_COLOR)->as<ob::VideoFrame>();
+            if(!colorFrame)
+                continue;
+
+            cv::Mat img(colorFrame->height(), colorFrame->width(), CV_8UC3, colorFrame->data());
+
+            // ── Publish to Iceoryx ───────────────────────────────────────
+            uint32_t width    = colorFrame->width();
+            uint32_t height   = colorFrame->height();
+            uint32_t dataSize = colorFrame->dataSize();
+            uint32_t format   = colorFrame->format();
+
+            uint64_t payloadSize = sizeof(orbbec_iceoryx::ColorFrameData) + dataSize - 1;
+
+            publisher.loan(static_cast<uint32_t>(payloadSize))
+                .and_then([&](auto &userPayload) {
+                    auto *data      = static_cast<orbbec_iceoryx::ColorFrameData *>(userPayload);
+                    data->timestamp = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+                    data->width     = width;
+                    data->height    = height;
+                    data->encoding  = format;
+                    data->data_size = dataSize;
+
+                    std::memcpy(data->data, colorFrame->data(), dataSize);
+                    publisher.publish(userPayload);
+                })
+                .or_else([&](auto &error) { std::cerr << "Failed to loan Iceoryx sample: " << static_cast<int>(error) << std::endl; });
         }
 
-        // get color frame from frameset.
-        auto colorFrame = frameSet->getFrame(OB_FRAME_COLOR);
-        // Render colorFrame.
-        win.pushFramesToView(colorFrame);
+        pipe.stop();
     }
-
-    // Stop the Pipeline, no frame data will be generated
-    pipe.stop();
+    catch(ob::Error &e) {
+        std::cerr << "OB Error: " << e.what() << std::endl;
+        return -1;
+    }
+    catch(std::exception &e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
 
     return 0;
 }
-catch(ob::Error &e) {
-    std::cerr << "function:" << e.getFunction() << "\nargs:" << e.getArgs() << "\nmessage:" << e.what() << "\ntype:" << e.getExceptionType() << std::endl;
-    std::cout << "\nPress any key to exit.";
-    ob_smpl::waitForKeyPressed();
-    exit(EXIT_FAILURE);
-}
-
