@@ -14,7 +14,7 @@ int main() {
     iox::runtime::PoshRuntime::initRuntime("ob_color_publisher");
 
     iox::popo::PublisherOptions pubOptions;
-    pubOptions.historyCapacity = 16U;  // Reduced to avoid exceeding the maximum limit (16)
+    pubOptions.historyCapacity = 16U;  
 
     iox::popo::UntypedPublisher publisher(iox::capro::ServiceDescription{ iox::capro::IdString_t(iox::cxx::TruncateToCapacity, "Orbbec"),
                                                                           iox::capro::IdString_t(iox::cxx::TruncateToCapacity, "Camera"),
@@ -25,22 +25,36 @@ int main() {
         ob::Pipeline pipe;
         auto         device = pipe.getDevice();
 
+        // Helper lambda: only set a property if the device supports writing it
+        auto trySetBool = [&](OBPropertyID id, bool val, const char* name) {
+            if(device->isPropertySupported(id, OB_PERMISSION_WRITE))
+                device->setBoolProperty(id, val);
+            else
+                std::cerr << "[WARN] Property not writable, skipping: " << name << std::endl;
+        };
+        auto trySetInt = [&](OBPropertyID id, int32_t val, const char* name) {
+            if(device->isPropertySupported(id, OB_PERMISSION_WRITE))
+                device->setIntProperty(id, val);
+            else
+                std::cerr << "[WARN] Property not writable, skipping: " << name << std::endl;
+        };
+
         // ── Auto Controls OFF ────────────────────────────────────────
-        device->setBoolProperty(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, false);
-        device->setBoolProperty(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, false);
-        device->setIntProperty(OB_PROP_COLOR_BACKLIGHT_COMPENSATION_INT, 0);
-        device->setIntProperty(OB_PROP_COLOR_DENOISING_LEVEL_INT, 0);
+        trySetBool(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL,      false, "AUTO_EXPOSURE");
+        trySetBool(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, false, "AUTO_WHITE_BALANCE");
+        trySetInt (OB_PROP_COLOR_BACKLIGHT_COMPENSATION_INT, 0,  "BACKLIGHT_COMPENSATION");
+        trySetInt (OB_PROP_COLOR_DENOISING_LEVEL_INT,        0,  "DENOISING_LEVEL");
 
         // ── Exposure & Gain ──────────────────────────────────────────
-        device->setIntProperty(OB_PROP_COLOR_EXPOSURE_INT, 65);
-        device->setIntProperty(OB_PROP_COLOR_GAIN_INT, 6);
+        trySetInt(OB_PROP_COLOR_EXPOSURE_INT, 3, "EXPOSURE");
+        trySetInt(OB_PROP_COLOR_GAIN_INT,      6, "GAIN");
 
         // ── White Balance ────────────────────────────────────────────
-        device->setIntProperty(OB_PROP_COLOR_WHITE_BALANCE_INT, 4800);
+        trySetInt(OB_PROP_COLOR_WHITE_BALANCE_INT, 4800, "WHITE_BALANCE");
 
         // ── Image Quality ────────────────────────────────────────────
-        device->setIntProperty(OB_PROP_COLOR_SHARPNESS_INT, 32);
-        device->setIntProperty(OB_PROP_COLOR_CONTRAST_INT, 47);
+        trySetInt(OB_PROP_COLOR_SHARPNESS_INT, 32, "SHARPNESS");
+        trySetInt(OB_PROP_COLOR_CONTRAST_INT,  47, "CONTRAST");
 
         // ── Stream Config ────────────────────────────────────────────
         auto config = std::make_shared<ob::Config>();

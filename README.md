@@ -431,3 +431,35 @@ This project is licensed under the MIT License with some other licenses for thir
 - [Orbbec SDK V1.x Pre-Compiled Library](https://github.com/orbbec/OrbbecSDK)
 - [Orbbec Company Main Page](https://www.orbbec.com/)
 - [Orbbec 3D Club](https://3dclub.orbbec3d.com)
+
+---
+
+## Runway Mitra v2 Integration
+
+This repository fork includes the Orbbec SDK as part of the Runway Mitra v2 multi-sensor ingestion layer. The SDK is used by the `sensor_ingestion_layer` to capture high-framerate Color Streams (e.g., from Gemini series cameras) and publish them into the Iceoryx shared memory middleware.
+
+### Setup Guidelines
+- The Orbbec cameras must be connected and authorized on the system via `udev` rules.
+- **Iceoryx RouDi** must be actively running to create the shared memory segments required for color stream publishing.
+
+### Installation
+The Orbbec SDK dependencies must be built and linked alongside the `sensor_ingestion_layer`.
+Ensure the SDK is built with CMake:
+```bash
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+```
+Dependencies:
+- **Iceoryx** (for the IPC Publisher)
+- **OpenCV** (Optional, for debugging or viewing frames locally)
+
+### Usage & configuration
+The `camera_frames_save` executable (located in the `sensor_ingestion_layer`) utilizes this SDK to continuously publish camera color frames.
+```bash
+# In the sensor_ingestion_layer build directory:
+./camera_frames_save
+```
+- The node publishes to the Iceoryx Service `("Orbbec", <sensor_serial>, "ColorStream")`.
+- Metadata (Timestamp, sequence number, image resolution) is attached to the raw payload within `TriggerWithCompData`.
+- Make sure to review `iox_config.toml` to allocate sufficient mempool chunks if using high-resolution color streams (e.g., 1080p RGB).
