@@ -14,7 +14,7 @@ int main() {
     iox::runtime::PoshRuntime::initRuntime("ob_color_publisher");
 
     iox::popo::PublisherOptions pubOptions;
-    pubOptions.historyCapacity = 16U;  
+    pubOptions.historyCapacity = 16U;
 
     iox::popo::UntypedPublisher publisher(iox::capro::ServiceDescription{ iox::capro::IdString_t(iox::cxx::TruncateToCapacity, "Orbbec"),
                                                                           iox::capro::IdString_t(iox::cxx::TruncateToCapacity, "Camera"),
@@ -26,13 +26,13 @@ int main() {
         auto         device = pipe.getDevice();
 
         // Helper lambda: only set a property if the device supports writing it
-        auto trySetBool = [&](OBPropertyID id, bool val, const char* name) {
+        auto trySetBool = [&](OBPropertyID id, bool val, const char *name) {
             if(device->isPropertySupported(id, OB_PERMISSION_WRITE))
                 device->setBoolProperty(id, val);
             else
                 std::cerr << "[WARN] Property not writable, skipping: " << name << std::endl;
         };
-        auto trySetInt = [&](OBPropertyID id, int32_t val, const char* name) {
+        auto trySetInt = [&](OBPropertyID id, int32_t val, const char *name) {
             if(device->isPropertySupported(id, OB_PERMISSION_WRITE))
                 device->setIntProperty(id, val);
             else
@@ -40,21 +40,21 @@ int main() {
         };
 
         // ── Auto Controls OFF ────────────────────────────────────────
-        trySetBool(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL,      false, "AUTO_EXPOSURE");
+        trySetBool(OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, false, "AUTO_EXPOSURE");
         trySetBool(OB_PROP_COLOR_AUTO_WHITE_BALANCE_BOOL, false, "AUTO_WHITE_BALANCE");
-        trySetInt (OB_PROP_COLOR_BACKLIGHT_COMPENSATION_INT, 0,  "BACKLIGHT_COMPENSATION");
-        trySetInt (OB_PROP_COLOR_DENOISING_LEVEL_INT,        0,  "DENOISING_LEVEL");
+        trySetInt(OB_PROP_COLOR_BACKLIGHT_COMPENSATION_INT, 0, "BACKLIGHT_COMPENSATION");
+        trySetInt(OB_PROP_COLOR_DENOISING_LEVEL_INT, 0, "DENOISING_LEVEL");
 
         // ── Exposure & Gain ──────────────────────────────────────────
         trySetInt(OB_PROP_COLOR_EXPOSURE_INT, 3, "EXPOSURE");
-        trySetInt(OB_PROP_COLOR_GAIN_INT,      6, "GAIN");
+        trySetInt(OB_PROP_COLOR_GAIN_INT, 6, "GAIN");
 
         // ── White Balance ────────────────────────────────────────────
         trySetInt(OB_PROP_COLOR_WHITE_BALANCE_INT, 4800, "WHITE_BALANCE");
 
         // ── Image Quality ────────────────────────────────────────────
         trySetInt(OB_PROP_COLOR_SHARPNESS_INT, 32, "SHARPNESS");
-        trySetInt(OB_PROP_COLOR_CONTRAST_INT,  47, "CONTRAST");
+        trySetInt(OB_PROP_COLOR_CONTRAST_INT, 47, "CONTRAST");
 
         // ── Stream Config ────────────────────────────────────────────
         auto config = std::make_shared<ob::Config>();
@@ -80,7 +80,7 @@ int main() {
             uint32_t format   = colorFrame->format();
 
             uint64_t payloadSize = sizeof(orbbec_iceoryx::ColorFrameData) + dataSize - 1;
-
+            std::cout << payloadSize;
             publisher.loan(static_cast<uint32_t>(payloadSize))
                 .and_then([&](auto &userPayload) {
                     auto *data      = static_cast<orbbec_iceoryx::ColorFrameData *>(userPayload);
