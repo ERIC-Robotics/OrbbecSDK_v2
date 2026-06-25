@@ -1,0 +1,26 @@
+# orbbec_publisher configuration
+
+# ── V4L2 devices to capture from ──────────────────────────────────────────
+# Each device needs a path and a name. The name is used as the iceoryx
+# instance identifier and can be overridden with --device <path> <name>.
+devices:
+  - path: /dev/video0
+    name: cam0
+  - path: /dev/video2
+    name: cam1
+
+# ── Resolution ─────────────────────────────────────────────────────────────
+width:  1280
+height: 720
+
+# ── Frame rate ─────────────────────────────────────────────────────────────
+fps: 30
+
+# ── Pixel format ───────────────────────────────────────────────────────────
+# YUYV: packed YUV 4:2:2 (most V4L2 cameras)
+# MJPEG: hardware-compressed JPEG (lower bandwidth)
+pixel_format: YUYV
+
+# ── Timeout and queue ──────────────────────────────────────────────────────
+image_timeout_ms: 2000
+queue_capacity:   500

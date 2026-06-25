@@ -1,0 +1,47 @@
+[general]
+version = 1
+
+# ── How to size the large pool ─────────────────────────────────────────────
+#
+# RGB8 payload = width * height * 3 bytes
+# Total iceoryx loan = kHeaderSize(40) + payload
+#
+# Common resolutions:
+#   1920x1200 RGB8 →  6,912,000 + 40 =  6,912,040 bytes  (~6.6 MiB)
+#   2448x2048 RGB8 → 15,040,512 + 40 = 15,040,552 bytes  (~14.3 MiB)
+#   4096x3000 RGB8 → 36,864,000 + 40 = 36,864,040 bytes  (~35.2 MiB)
+#
+# iceoryx prepends a ChunkHeader (~32 bytes) + up to 64-byte alignment pad.
+# Safe formula: round up (kHeaderSize + W*H*3 + 96) to next 64-byte boundary.
+#
+# The pool below is sized for 2448x2048 (≈14.3 MiB) + margin = 16 MiB.
+# If your cameras are 1920x1200, you can reduce to 8 MiB and save memory.
+# If your cameras are larger than 2448x2048, increase accordingly.
+#
+# count = 2 cameras × publisher history(1) + subscriber queue(500) ≈ 502 min.
+# We use 600 for headroom. At 16 MiB each: 600 × 16 MiB = 9.6 GB reserved.
+# Reduce count if you don't have that much RAM.
+# ──────────────────────────────────────────────────────────────────────────
+
+[[segment]]
+
+    # Small pools — iceoryx internal messaging (service discovery, heartbeats)
+    [[segment.mempool]]
+    size  = 128
+    count = 1000
+
+    [[segment.mempool]]
+    size  = 1024
+    count = 500
+
+    [[segment.mempool]]
+    size  = 16384
+    count = 200
+
+    # Large pool — RGB frame payloads
+    # Sized for 2448x2048 RGB8 + iceoryx overhead, rounded to 64-byte boundary.
+    # Adjust size and count to match your actual resolution and RAM budget.
+    [[segment.mempool]]
+    size  = 2097152   # 2 MiB — covers 1440x1080 BayerRG8 (1.5MB + overhead)
+    count = 300       # 2 cameras × 256 queue / 2 + headroom = ~300
+                      # 300 × 2MiB = 600MB — well under 16GB system RAM

@@ -1,0 +1,19 @@
+# orbbec_gst_publisher configuration
+# Used by orbbec_gst_publisher
+
+# V4L2 device path
+device: /dev/video0
+
+# Stream name — used as iceoryx instance: Orbbec/<name>/MJPEG
+name: cam0
+
+# Capture resolution
+width:  1280
+height: 720
+fps:    30
+
+# MJPEG encoder quality (1-100; higher = better quality / larger frames)
+quality: 85
+
+# HTTP MJPEG server port
+http_port: 9000

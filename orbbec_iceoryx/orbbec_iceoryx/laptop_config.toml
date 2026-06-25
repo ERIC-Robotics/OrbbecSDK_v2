@@ -1,0 +1,55 @@
+[general]
+version = 1
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Combined iceoryx config — Lucid cameras + Mechmind profilers
+#
+# Pool selection: iceoryx picks the smallest pool whose size ≥ requested bytes.
+# So both payload pools coexist cleanly — camera frames go to the 2 MiB pool,
+# profiler frames go to the 110 MiB pool. No cross-pool waste.
+#
+# ── Lucid (RGB8) ─────────────────────────────────────────────────────────────
+#   Using 2 MiB pool sized for 1440×1080 BayerRG8 (1.5 MB + overhead)
+#   count = 300 → 300 × 2 MiB = 600 MB
+#
+# ── Mechmind (Z + intensity) ─────────────────────────────────────────────────
+#   payload = 64 + (4096×5000×4) + (4096×5000×1) = 102,400,064 bytes
+#   iceoryx overhead: +32 ChunkHeader +64 alignment pad = 102,400,160 bytes
+#   Using 110 MiB (115,343,360) for clean alignment + margin
+#   count = 100 → 100 × 110 MiB = 11 GB
+#
+# ── Total reserved (approx) ──────────────────────────────────────────────────
+#   Small pools:  ~18 MB (negligible)
+#   Camera pool:  600 MB
+#   Profiler pool: 11 GB
+#   Grand total:  ~11.6 GB — ensure system has ≥ 16 GB RAM free for RouDi
+# ══════════════════════════════════════════════════════════════════════════════
+
+[[segment]]
+
+    # ── Small pools (iceoryx internal: service discovery, heartbeats, routing) ──
+    [[segment.mempool]]
+    size  = 128
+    count = 1000
+
+    [[segment.mempool]]
+    size  = 1024
+    count = 500
+
+    [[segment.mempool]]
+    size  = 16384
+    count = 200
+
+    # ── Lucid camera payload pool ─────────────────────────────────────────────
+    # Covers 1440×1080 BayerRG8 (1.5 MB + iceoryx overhead). Increase size to
+    # ~16 MiB if running 2448×2048 RGB8 cameras; reduce count if RAM is tight.
+    [[segment.mempool]]
+    size  = 2097152     # 2 MiB
+    count = 30         # 300 × 2 MiB = 600 MB
+
+    # ── Mechmind profiler payload pool ────────────────────────────────────────
+    # 4096×5000 Z-data (float32) + intensity (uint8) + headers, rounded up.
+    # Reduce count if you have fewer than ~10 profilers or limited RAM.
+    [[segment.mempool]]
+    size  = 115343360   # 110 MiB
+    count = 10         # 100 × 110 MiB = 11 GB

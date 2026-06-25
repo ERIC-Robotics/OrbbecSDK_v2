@@ -1,0 +1,9 @@
+# orbbec_saver configuration
+output_dir: data
+chunk_size_mib: 128
+segment_size_gib: 1        # set 0 to disable segmentation
+
+# Device names to subscribe to (must match the publisher's device names)
+devices:
+  - "cam0"
+  - "cam1"

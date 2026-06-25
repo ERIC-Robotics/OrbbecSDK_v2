@@ -1,0 +1,108 @@
+# Example usage:
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Logs
+*.log
+
+# Dependency directories
+node_modules/
+bower_components/
+vendor/
+
+# Build output
+dist/
+build/
+out/
+target/
+bin/
+obj/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+env/
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+
+# Misc
+*.swp
+*.bak
+*.tmp
+*.orig
+
+# Test coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Package managers
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment files
+.env
+.env.*
+
+# MacOS
+*.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Others
+*.tgz
+*.tar.gz
+*.zip
+*.7z
+*.gz
+*.rar
+
+# ── colcon / CMake build artifacts ──────────────────────────────────────────
+build/
+install/
+log/
+
+# Stray CMake output if built outside colcon
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# ── Recorded data ───────────────────────────────────────────────────────────
+data/
+*.mcap
+
+# ── Camera parameter script outputs ─────────────────────────────────────────
+# Compiled binaries from lucid_camera_parameter_scripts (built in-place inside
+# the Arena SDK directory).
+set_camera_params
+verify_userset
+
+# Sample frames / preview videos pulled off the bags
+*.png
+*.mkv
+*.mp4
+*.npy
