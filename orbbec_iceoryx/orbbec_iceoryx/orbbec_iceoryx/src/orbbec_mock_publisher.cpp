@@ -73,8 +73,8 @@ void mockWorker(const std::string &name, const MockConfig &cfg) {
 
   uint64_t idx = 0;
 
-  auto &LFL = LockFreeLogger::getInstance();
-  LFL.info(name, fmt::format("Starting | {}x{} YUYV | {} fps | {} bytes/frame",
+  auto &log = LockFreeLogger::getInstance();
+  log.info(name, fmt::format("Starting | {}x{} YUYV | {} fps | {} bytes/frame",
                              cfg.width, cfg.height, cfg.fps, payloadSize));
 
   orbbec::PublisherMetrics metrics(name, static_cast<double>(cfg.fps));
@@ -102,11 +102,11 @@ void mockWorker(const std::string &name, const MockConfig &cfg) {
           publisher.publish(userPayload);
           loanOk = true;
           if (idx % 100 == 0) {
-            LFL.info(name, fmt::format("Published frame {}.", idx));
+            log.info(name, fmt::format("Published frame {}.", idx));
           }
         })
         .or_else([&](auto &error) {
-          LFL.error(name, fmt::format("loan failed (err={}). "
+          log.error(name, fmt::format("loan failed (err={}). "
                                       "Check iox_config.toml pool sizes.",
                                       static_cast<int>(error)));
         });
@@ -117,7 +117,7 @@ void mockWorker(const std::string &name, const MockConfig &cfg) {
     metrics.update(idx, loanOk ? payloadSize : 0, latencyMs, loanOk);
 
     if (metrics.shouldReport(2.0)) {
-      LFL.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
+      log.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
     }
 
     ++idx;
@@ -127,7 +127,7 @@ void mockWorker(const std::string &name, const MockConfig &cfg) {
       std::this_thread::sleep_for(framePeriod - elapsed);
   }
 
-  LFL.info(name, fmt::format("Stopped after {} frames.", idx));
+  log.info(name, fmt::format("Stopped after {} frames.", idx));
 }
 
 } // namespace

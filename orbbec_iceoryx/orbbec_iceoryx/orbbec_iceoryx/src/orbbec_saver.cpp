@@ -106,12 +106,12 @@ void saverStatsWorker(const std::string &name, SaverStats &stats) {
 void saverWorker(const std::string &name, const fs::path &outDir,
                  const std::string &timestamp, uint64_t chunkSize,
                  uint64_t segmentSizeBytes) {
-  auto &LFL = LockFreeLogger::getInstance();
+  auto &log = LockFreeLogger::getInstance();
   fs::path deviceDir = outDir / name;
   try {
     fs::create_directories(deviceDir);
   } catch (const std::exception &e) {
-    LFL.error(name, fmt::format("Cannot create output dir: {}", e.what()));
+    log.error(name, fmt::format("Cannot create output dir: {}", e.what()));
     return;
   }
 
@@ -144,12 +144,12 @@ void saverWorker(const std::string &name, const fs::path &outDir,
       writer->open();
       stats.current_segment.store(segIndex);
       stats.segment_bytes.store(0);
-      LFL.info(name, fmt::format("Segment {} opened: {}", segIndex,
+      log.info(name, fmt::format("Segment {} opened: {}", segIndex,
                                  makeSegmentPath().string()));
     } catch (const std::exception &e) {
       const std::string msg =
           fmt::format("Failed to open segment: {}", e.what());
-      LFL.error(name, msg);
+      log.error(name, msg);
       stats.setError(msg);
       return nullptr;
     }
@@ -169,7 +169,7 @@ void saverWorker(const std::string &name, const fs::path &outDir,
       options);
 
   subscriber.subscribe();
-  LFL.info(name, "Subscribed. Waiting for frames...");
+  log.info(name, "Subscribed. Waiting for frames...");
 
   auto mcapWriter = openWriter();
   if (!mcapWriter)
@@ -184,13 +184,13 @@ void saverWorker(const std::string &name, const fs::path &outDir,
     auto subState = subscriber.getSubscriptionState();
     if (subState != lastState) {
       if (subState == iox::SubscribeState::SUBSCRIBED)
-        LFL.info(name, "Successfully subscribed.");
+        log.info(name, "Successfully subscribed.");
       lastState = subState;
     }
 
     if (segmentSizeBytes > 0 &&
         mcapWriter->bytes_written() >= segmentSizeBytes) {
-      LFL.info(name, fmt::format("Closing segment {} | frames={} | size={} MiB",
+      log.info(name, fmt::format("Closing segment {} | frames={} | size={} MiB",
                                  segIndex, mcapWriter->frames_written(),
                                  mcapWriter->bytes_written() / 1024 / 1024));
       mcapWriter->close();
@@ -250,7 +250,7 @@ void saverWorker(const std::string &name, const fs::path &outDir,
             subscriber.release(payload);
 
             if (frameIndex % 100 == 0) {
-              LFL.info(name, fmt::format("frame={}  seq={}  seg={}  bytes={}",
+              log.info(name, fmt::format("frame={}  seq={}  seg={}  bytes={}",
                                          frameIndex, frame->sequence_number,
                                          segIndex, payloadBytes));
             }
@@ -263,14 +263,14 @@ void saverWorker(const std::string &name, const fs::path &outDir,
     }
 
     if (metrics.shouldReport(2.0))
-      LFL.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
+      log.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
 
     if (!gotAny)
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   mcapWriter->close();
-  LFL.info(name, fmt::format("Worker done. total_frames={}  segments={}",
+  log.info(name, fmt::format("Worker done. total_frames={}  segments={}",
                              frameIndex, segIndex));
 }
 

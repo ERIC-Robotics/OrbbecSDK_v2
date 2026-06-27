@@ -5,8 +5,11 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
 #include <iostream>
+#include <limits.h>
 #include <linux/videodev2.h>
+#include <stdlib.h>
 #include <string>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -57,6 +60,7 @@ struct DeviceProbeInfo {
     std::string driver;
     std::string card;
     std::string bus_info;
+    std::string serial; // USB serial number, empty if unavailable
 };
 
 inline std::vector<FormatInfo> enumerateFormats(int fd) {
@@ -109,6 +113,36 @@ inline std::vector<FormatInfo> enumerateFormats(int fd) {
     return result;
 }
 
+// Read USB serial number for a V4L2 device by walking sysfs up to the USB
+// device level where the "serial" attribute lives.
+inline std::string getDeviceSerial(const std::string &videoPath) {
+    const auto devName = videoPath.substr(videoPath.rfind('/') + 1);
+    const std::string sysLink =
+        "/sys/class/video4linux/" + devName + "/device";
+
+    char resolved[PATH_MAX];
+    if (realpath(sysLink.c_str(), resolved) == nullptr)
+        return "";
+
+    std::string dir = resolved;
+    for (int depth = 0; depth < 8; ++depth) {
+        std::ifstream f(dir + "/serial");
+        if (f) {
+            std::string s;
+            std::getline(f, s);
+            while (!s.empty() && (s.back() == '\r' || s.back() == ' ' || s.back() == '\n'))
+                s.pop_back();
+            if (!s.empty())
+                return s;
+        }
+        const auto pos = dir.rfind('/');
+        if (pos == std::string::npos || pos == 0)
+            break;
+        dir.resize(pos);
+    }
+    return "";
+}
+
 inline std::vector<DeviceProbeInfo> scanDevices(int maxN = 20) {
     std::vector<DeviceProbeInfo> found;
     for (int n = 0; n < maxN; ++n) {
@@ -122,7 +156,8 @@ inline std::vector<DeviceProbeInfo> scanDevices(int maxN = 20) {
                 path,
                 reinterpret_cast<const char *>(cap.driver),
                 reinterpret_cast<const char *>(cap.card),
-                reinterpret_cast<const char *>(cap.bus_info)});
+                reinterpret_cast<const char *>(cap.bus_info),
+                getDeviceSerial(path)});
         }
         close(fd);
     }
@@ -167,9 +202,12 @@ inline Selection interactiveSelect(const std::string &defaultName = "cam0") {
     }
 
     std::cout << "\nAvailable cameras:\n";
-    for (size_t i = 0; i < found.size(); ++i)
-        std::cout << fmt::format("  [{}] {}  —  {} ({})\n",
-            i, found[i].path, found[i].card, found[i].bus_info);
+    for (size_t i = 0; i < found.size(); ++i) {
+        const auto &d = found[i];
+        std::cout << fmt::format("  [{}] {}  —  {} ({}){}",
+            i, d.path, d.card, d.bus_info,
+            d.serial.empty() ? "\n" : fmt::format("  serial={}\n", d.serial));
+    }
 
     int camIdx = promptIndex(
         fmt::format("\nSelect camera [0-{}]: ", found.size() - 1),

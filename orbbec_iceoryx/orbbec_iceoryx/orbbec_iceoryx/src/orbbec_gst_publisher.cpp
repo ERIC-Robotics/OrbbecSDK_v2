@@ -267,55 +267,105 @@ struct Config {
   uint32_t http_port = 9000;
   bool forceJetson = false;
   bool forceCpu = false;
+  bool stream = false;         // enable HTTP MJPEG server
+  std::string raw_stream = ""; // Unix socket for nvunixfdsink; empty = disabled
 };
 
 // ── GStreamer pipeline builder ────────────────────────────────────────────
 std::string buildPipeline(const Config &c, Encoder enc) {
+  const bool hasRaw = !c.raw_stream.empty();
+
   if (enc == Encoder::PASSTHROUGH) {
-    // Camera outputs MJPEG directly: read, parse, sink — no re-encoding
-    return fmt::format("v4l2src device={device} "
-                       "! image/jpeg,width={w},height={h},framerate={fps}/1 "
-                       "! jpegparse "
-                       "! appsink name=mjpeg_sink sync=false "
-                       "emit-signals=false max-buffers=2 drop=true",
-                       fmt::arg("device", c.device), fmt::arg("w", c.width),
-                       fmt::arg("h", c.height), fmt::arg("fps", c.fps));
+    // Camera outputs MJPEG directly — no re-encoding needed.
+    // If raw_stream is set, tee: one branch stays compressed (appsink),
+    // the other decodes to NV12/RGB and feeds nvunixfdsink.
+    const std::string base =
+        fmt::format("v4l2src device={device} "
+                    "! image/jpeg,width={w},height={h},framerate={fps}/1 "
+                    "! jpegparse ",
+                    fmt::arg("device", c.device), fmt::arg("w", c.width),
+                    fmt::arg("h", c.height), fmt::arg("fps", c.fps));
+
+    if (!hasRaw) {
+      return base + "! appsink name=mjpeg_sink sync=false "
+                    "emit-signals=false max-buffers=2 drop=true";
+    }
+
+    // Decode MJPEG → raw for the nvunixfdsink branch.
+    // On Jetson use nvjpegdec + nvvidconv → NV12(NVMM); otherwise CPU path.
+    const std::string decode_seg =
+        c.forceJetson ? "jpegdec ! nvvideoconvert ! "
+                        "video/x-raw(memory:NVMM),format=NV12"
+                      : "jpegdec ! videoconvert ! video/x-raw,format=RGB";
+
+    return fmt::format("{base}! tee name=t "
+                       "t. ! queue ! appsink name=mjpeg_sink sync=false "
+                       "emit-signals=false max-buffers=2 drop=true "
+                       "t. ! queue ! {decode} "
+                       "! nvunixfdsink socket-path={socket} sync=false",
+                       fmt::arg("base", base), fmt::arg("decode", decode_seg),
+                       fmt::arg("socket", c.raw_stream));
   }
 
-  std::string encoder_seg;
+  // ── Non-passthrough: raw camera → encode → JPEG ───────────────────────
+  // JPEG branch (to appsink) and raw branch (to nvunixfdsink) per encoder.
+  std::string enc_branch;
+  std::string raw_branch;
+
   switch (enc) {
   case Encoder::NVJPEGENC_JETSON:
-    encoder_seg =
-        fmt::format("! videoconvert ! video/x-raw,format=I420 "
+    enc_branch =
+        fmt::format("videoconvert ! video/x-raw,format=I420 "
                     "! nvvidconv ! video/x-raw(memory:NVMM),format=I420 "
-                    "! nvjpegenc quality={q} ",
+                    "! nvjpegenc quality={q} ! jpegparse "
+                    "! appsink name=mjpeg_sink sync=false emit-signals=false "
+                    "max-buffers=2 drop=true",
                     fmt::arg("q", c.quality));
+    raw_branch = fmt::format("nvvidconv ! video/x-raw(memory:NVMM),format=NV12 "
+                             "! nvunixfdsink socket-path={socket} sync=false",
+                             fmt::arg("socket", c.raw_stream));
     break;
   case Encoder::NVJPEGENC_DESKTOP:
-    encoder_seg = fmt::format("! videoconvert ! video/x-raw,format=I420 "
-                              "! nvjpegenc quality={q} ",
-                              fmt::arg("q", c.quality));
+    enc_branch =
+        fmt::format("videoconvert ! video/x-raw,format=I420 "
+                    "! nvjpegenc quality={q} ! jpegparse "
+                    "! appsink name=mjpeg_sink sync=false emit-signals=false "
+                    "max-buffers=2 drop=true",
+                    fmt::arg("q", c.quality));
+    raw_branch = fmt::format("videoconvert ! video/x-raw,format=NV12 "
+                             "! nvunixfdsink socket-path={socket} sync=false",
+                             fmt::arg("socket", c.raw_stream));
     break;
-  default:
-    encoder_seg = fmt::format("! videoconvert ! video/x-raw,format=I420 "
-                              "! jpegenc quality={q} ",
-                              fmt::arg("q", c.quality));
+  default: // JPEGENC_CPU
+    enc_branch =
+        fmt::format("videoconvert ! video/x-raw,format=I420 "
+                    "! jpegenc quality={q} ! jpegparse "
+                    "! appsink name=mjpeg_sink sync=false emit-signals=false "
+                    "max-buffers=2 drop=true",
+                    fmt::arg("q", c.quality));
+    raw_branch = fmt::format("videoconvert ! video/x-raw,format=RGB "
+                             "! nvunixfdsink socket-path={socket} sync=false",
+                             fmt::arg("socket", c.raw_stream));
     break;
   }
 
-  std::string source_seg = fmt::format("v4l2src device={device} ! decodebin ",
-                                       fmt::arg("device", c.device));
+  const std::string source =
+      fmt::format("v4l2src device={device} ! decodebin "
+                  "! videoconvert ! videoscale ! videorate "
+                  "! video/x-raw,width={w},height={h},framerate={fps}/1 ",
+                  fmt::arg("device", c.device), fmt::arg("w", c.width),
+                  fmt::arg("h", c.height), fmt::arg("fps", c.fps));
 
-  return fmt::format("{source}"
-                     "! videoconvert ! videoscale ! videorate "
-                     "! video/x-raw,width={w},height={h},framerate={fps}/1 "
-                     "{enc}"
-                     "! jpegparse "
-                     "! appsink name=mjpeg_sink sync=false emit-signals=false "
-                     "max-buffers=2 drop=true",
-                     fmt::arg("source", source_seg), fmt::arg("w", c.width),
-                     fmt::arg("h", c.height), fmt::arg("fps", c.fps),
-                     fmt::arg("enc", encoder_seg));
+  if (!hasRaw) {
+    return fmt::format("{src}! {enc}", fmt::arg("src", source),
+                       fmt::arg("enc", enc_branch));
+  }
+
+  return fmt::format("{src}! tee name=t "
+                     "t. ! queue ! {enc} "
+                     "t. ! queue ! {raw}",
+                     fmt::arg("src", source), fmt::arg("enc", enc_branch),
+                     fmt::arg("raw", raw_branch));
 }
 
 // ── iceoryx + HTTP publish callback ──────────────────────────────────────
@@ -403,7 +453,7 @@ int main(int argc, char **argv) {
 
   Config cfg;
   bool cliFormatSet = false;
-  bool cliSizeSet   = false;
+  bool cliSizeSet = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -430,26 +480,36 @@ int main(int argc, char **argv) {
       cfg.forceJetson = true;
     else if (a == "--cpu")
       cfg.forceCpu = true;
+    else if (a == "--stream")
+      cfg.stream = true;
+    else if (a == "--raw-stream" && i + 1 < argc)
+      cfg.raw_stream = argv[++i];
     else if (a == "--help" || a == "-h") {
       std::cout
           << "Usage: orbbec_gst_publisher [OPTIONS]\n"
-          << "  --device   <path>    V4L2 device (default: interactive)\n"
-          << "  --name     <str>     Stream name / iceoryx instance (default: "
+          << "  --device      <path>   V4L2 device (default: interactive)\n"
+          << "  --name        <str>    Stream name / iceoryx instance "
+             "(default: "
              "cam0)\n"
-          << "  --format   <fmt>     MJPEG for passthrough, omit for "
+          << "  --format      <fmt>    MJPEG for passthrough, omit for "
              "auto-encode\n"
-          << "  --width    <px>      Capture width  (default: 1280)\n"
-          << "  --height   <px>      Capture height (default: 720)\n"
-          << "  --fps      <n>       Frame rate (default: 30)\n"
-          << "  --quality  <1-100>   JPEG quality for encoding (default: 85)\n"
-          << "  --port     <n>       HTTP MJPEG server port (default: 9000)\n"
-          << "  --jetson             Force Jetson nvvidconv+nvjpegenc\n"
-          << "  --cpu                Force jpegenc (software)\n"
+          << "  --width       <px>     Capture width  (default: 1280)\n"
+          << "  --height      <px>     Capture height (default: 720)\n"
+          << "  --fps         <n>      Frame rate (default: 30)\n"
+          << "  --quality     <1-100>  JPEG quality for encoding (default: "
+             "85)\n"
+          << "  --port        <n>      HTTP MJPEG server port (default: 9000)\n"
+          << "  --jetson               Force Jetson nvvidconv+nvjpegenc\n"
+          << "  --cpu                  Force jpegenc (software)\n"
+          << "  --stream               Enable HTTP MJPEG server (default: "
+             "off)\n"
+          << "  --raw-stream  <path>   Enable nvunixfdsink raw NV12/RGB branch "
+             "at this Unix socket path\n"
           << "\nOutputs:\n"
-          << "  iceoryx : Orbbec/<name>/MJPEG  (read with orbbec_saver_gst / "
-             "orbbec_viewer --mjpeg)\n"
-          << "  HTTP    : http://<host>:<port>/  (multipart/x-mixed-replace "
-             "MJPEG)\n";
+          << "  iceoryx    : Orbbec/<name>/MJPEG  (always on)\n"
+          << "  HTTP       : http://<host>:<port>/  (--stream only)\n"
+          << "  raw frames : nvunixfdsink at --raw-stream path "
+             "(NV12 on Jetson/NVJPEG, RGB on CPU)\n";
       log.shutdown();
       return 0;
     }
@@ -488,9 +548,8 @@ int main(int argc, char **argv) {
             cfg.format = v4l2probe::fourccToString(f.fourcc);
           isMjpegPassthrough = (f.fourcc == V4L2_PIX_FMT_MJPEG);
           log.info("publisher",
-                   fmt::format("Auto-selected: {} ({}) — {} {}x{}",
-                               dev.path, dev.card, cfg.format, cfg.width,
-                               cfg.height));
+                   fmt::format("Auto-selected: {} ({}) — {} {}x{}", dev.path,
+                               dev.card, cfg.format, cfg.width, cfg.height));
           found = true;
           break;
         }
@@ -516,10 +575,10 @@ int main(int argc, char **argv) {
       if (!sel.valid)
         return 1;
       cfg.device = sel.device.path;
-      cfg.name   = sel.name;
-      cfg.width  = sel.size.width  > 0 ? sel.size.width  : cfg.width;
+      cfg.name = sel.name;
+      cfg.width = sel.size.width > 0 ? sel.size.width : cfg.width;
       cfg.height = sel.size.height > 0 ? sel.size.height : cfg.height;
-      cfg.fps    = sel.fps         > 0 ? sel.fps         : cfg.fps;
+      cfg.fps = sel.fps > 0 ? sel.fps : cfg.fps;
       cfg.format = v4l2probe::fourccToString(sel.format.fourcc);
       isMjpegPassthrough = (sel.format.fourcc == V4L2_PIX_FMT_MJPEG);
     }
@@ -549,20 +608,26 @@ int main(int argc, char **argv) {
 
   log.info("publisher",
            fmt::format("=== orbbec_gst_publisher ===\n"
-                       "  Device   : {}\n"
-                       "  Name     : {}\n"
-                       "  Size     : {}x{}@{} fps\n"
-                       "  Encoder  : {}\n"
-                       "  Quality  : {}\n"
-                       "  iceoryx  : {}\n"
-                       "  HTTP     : http://0.0.0.0:{}/\n"
+                       "  Device     : {}\n"
+                       "  Name       : {}\n"
+                       "  Size       : {}x{}@{} fps\n"
+                       "  Encoder    : {}\n"
+                       "  Quality    : {}\n"
+                       "  iceoryx    : {}\n"
+                       "  HTTP       : {}\n"
+                       "  Raw stream : {}\n"
                        "============================\n"
                        "Pipeline:\n  {}",
                        cfg.device, cfg.name, cfg.width, cfg.height, cfg.fps,
                        encoderName(enc),
                        isMjpegPassthrough ? std::string("N/A (passthrough)")
                                           : std::to_string(cfg.quality),
-                       iceoryx_topic, cfg.http_port, pipe_str));
+                       iceoryx_topic,
+                       cfg.stream
+                           ? fmt::format("http://0.0.0.0:{}/", cfg.http_port)
+                           : std::string("(disabled)"),
+                       cfg.raw_stream.empty() ? "(disabled)" : cfg.raw_stream,
+                       pipe_str));
 
   GError *gerr = nullptr;
   GstElement *pipeline = gst_parse_launch(pipe_str.c_str(), &gerr);
@@ -575,8 +640,11 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  MjpegServer server(static_cast<int>(cfg.http_port));
-  AppsinkCtx appsinkCtx{&server, publisher.get(), cfg.name};
+  std::unique_ptr<MjpegServer> server;
+  if (cfg.stream)
+    server = std::make_unique<MjpegServer>(static_cast<int>(cfg.http_port));
+
+  AppsinkCtx appsinkCtx{server.get(), publisher.get(), cfg.name};
 
   GstAppSink *appsink =
       GST_APP_SINK(gst_bin_get_by_name(GST_BIN(pipeline), "mjpeg_sink"));
@@ -584,7 +652,8 @@ int main(int argc, char **argv) {
   cbs.new_sample = onNewSample;
   gst_app_sink_set_callbacks(appsink, &cbs, &appsinkCtx, nullptr);
 
-  server.start();
+  if (server)
+    server->start();
   gst_element_set_state(pipeline, GST_STATE_PLAYING);
   log.info(
       "publisher",
@@ -614,7 +683,8 @@ int main(int argc, char **argv) {
     break;
   }
 
-  server.stop();
+  if (server)
+    server->stop();
   gst_object_unref(bus);
   gst_object_unref(appsink);
   gst_element_set_state(pipeline, GST_STATE_NULL);

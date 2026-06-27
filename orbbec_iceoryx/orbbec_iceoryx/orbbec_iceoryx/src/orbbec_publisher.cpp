@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <future>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -310,8 +311,8 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
   const uint32_t pixFmt = v4l2probe::fourccFromString(cfg.pixel_format);
   const bool isMjpeg = (pixFmt == V4L2_PIX_FMT_MJPEG);
 
-  auto &LFL = LockFreeLogger::getInstance();
-  LFL.info(name,
+  auto &log = LockFreeLogger::getInstance();
+  log.info(name,
            fmt::format("Opening {} (format={})", dev.path, cfg.pixel_format));
 
   // ── Open device
@@ -319,7 +320,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
   if (fd < 0) {
     const std::string msg =
         fmt::format("Cannot open {}: {}", dev.path, strerror(errno));
-    LFL.error(name, msg);
+    log.error(name, msg);
     stats.setError(msg);
     stats.stream_ok.store(0);
     return;
@@ -338,7 +339,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
     fmt.fmt.pix.pixelformat = pixFmt;
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     if (xioctl(fd, VIDIOC_S_FMT, &fmt) < 0)
-      LFL.warn(name, fmt::format("VIDIOC_S_FMT: {}", strerror(errno)));
+      log.warn(name, fmt::format("VIDIOC_S_FMT: {}", strerror(errno)));
   }
 
   // ── Set frame rate
@@ -348,7 +349,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
     parm.parm.capture.timeperframe.numerator = 1;
     parm.parm.capture.timeperframe.denominator = cfg.fps;
     if (xioctl(fd, VIDIOC_S_PARM, &parm) < 0)
-      LFL.warn(name, fmt::format("VIDIOC_S_PARM: {}", strerror(errno)));
+      log.warn(name, fmt::format("VIDIOC_S_PARM: {}", strerror(errno)));
   }
 
   // ── Log actual negotiated format
@@ -361,7 +362,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
       actualPixFmt = actual.fmt.pix.pixelformat;
       actualW = actual.fmt.pix.width;
       actualH = actual.fmt.pix.height;
-      LFL.info(name,
+      log.info(name,
                fmt::format("Negotiated: {}x{} format={}", actualW, actualH,
                            v4l2probe::fourccToString(actualPixFmt)));
     }
@@ -377,7 +378,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
     if (xioctl(fd, VIDIOC_REQBUFS, &req) < 0) {
       const std::string msg =
           fmt::format("VIDIOC_REQBUFS: {}", strerror(errno));
-      LFL.error(name, msg);
+      log.error(name, msg);
       stats.setError(msg);
       close(fd);
       return;
@@ -389,7 +390,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
       buf.memory = V4L2_MEMORY_MMAP;
       buf.index = i;
       if (xioctl(fd, VIDIOC_QUERYBUF, &buf) < 0) {
-        LFL.error(name, fmt::format("VIDIOC_QUERYBUF: {}", strerror(errno)));
+        log.error(name, fmt::format("VIDIOC_QUERYBUF: {}", strerror(errno)));
         close(fd);
         return;
       }
@@ -397,7 +398,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
       buffers[i].start = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE,
                               MAP_SHARED, fd, buf.m.offset);
       if (buffers[i].start == MAP_FAILED) {
-        LFL.error(name, fmt::format("mmap: {}", strerror(errno)));
+        log.error(name, fmt::format("mmap: {}", strerror(errno)));
         close(fd);
         return;
       }
@@ -430,13 +431,13 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
     if (xioctl(fd, VIDIOC_STREAMON, &type) < 0) {
       const std::string msg =
           fmt::format("VIDIOC_STREAMON: {}", strerror(errno));
-      LFL.error(name, msg);
+      log.error(name, msg);
       stats.setError(msg);
       stats.stream_ok.store(0);
       return false;
     }
     stats.stream_ok.store(1);
-    LFL.info(name, fmt::format("Stream started ({})",
+    log.info(name, fmt::format("Stream started ({})",
                                isMjpeg ? "MJPEG passthrough" : "raw"));
     return true;
   };
@@ -445,7 +446,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     xioctl(fd, VIDIOC_STREAMOFF, &type);
     stats.stream_ok.store(0);
-    LFL.info(name, "Stream stopped.");
+    log.info(name, "Stream stopped.");
   };
 
   if (!queueAll() || !startStream()) {
@@ -471,7 +472,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
             iox::capro::IdString_t(iox::TruncateToCapacity, name.c_str()),
             iox::capro::IdString_t(iox::TruncateToCapacity, "MJPEG")},
         pubOpts);
-    LFL.info(name, fmt::format("Publishing on Orbbec/{}/MJPEG", name));
+    log.info(name, fmt::format("Publishing on Orbbec/{}/MJPEG", name));
   } else {
     rawPublisher = std::make_unique<iox::popo::UntypedPublisher>(
         iox::capro::ServiceDescription{
@@ -479,7 +480,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
             iox::capro::IdString_t(iox::TruncateToCapacity, name.c_str()),
             iox::capro::IdString_t(iox::TruncateToCapacity, "Frame")},
         pubOpts);
-    LFL.info(name, fmt::format("Publishing on Orbbec/{}/Frame", name));
+    log.info(name, fmt::format("Publishing on Orbbec/{}/Frame", name));
   }
 
   // ── Health worker thread
@@ -501,7 +502,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
       std::chrono::steady_clock::now().time_since_epoch().count());
 
   auto doReset = [&]() -> bool {
-    LFL.info(name, "Executing stream reset.");
+    log.info(name, "Executing stream reset.");
     stopStream();
     freeMmap();
 
@@ -554,7 +555,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
       if (errno == EINTR)
         continue;
       const std::string msg = fmt::format("poll: {}", strerror(errno));
-      LFL.error(name, msg);
+      log.error(name, msg);
       stats.setError(msg);
       stats.stream_ok.store(0);
       handle->lastHeartbeatNs.store(0);
@@ -573,7 +574,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
       if (errno == EAGAIN)
         continue;
       const std::string msg = fmt::format("VIDIOC_DQBUF: {}", strerror(errno));
-      LFL.error(name, msg);
+      log.error(name, msg);
       stats.setError(msg);
       stats.stream_ok.store(0);
       handle->lastHeartbeatNs.store(0);
@@ -613,7 +614,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
             const std::string msg = fmt::format(
                 "iceoryx MJPEG loan failed (err={}). Pool may be undersized.",
                 static_cast<int>(error));
-            LFL.error(name, msg);
+            log.error(name, msg);
             stats.setError(msg);
             stats.loan_failures.fetch_add(1);
           });
@@ -640,7 +641,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
             const std::string msg = fmt::format(
                 "iceoryx Frame loan failed (err={}). Pool may be undersized.",
                 static_cast<int>(error));
-            LFL.error(name, msg);
+            log.error(name, msg);
             stats.setError(msg);
             stats.loan_failures.fetch_add(1);
           });
@@ -654,10 +655,10 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
     }
 
     if (xioctl(fd, VIDIOC_QBUF, &buf) < 0)
-      LFL.warn(name, fmt::format("VIDIOC_QBUF: {}", strerror(errno)));
+      log.warn(name, fmt::format("VIDIOC_QBUF: {}", strerror(errno)));
 
     if (metrics.shouldReport(2.0))
-      LFL.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
+      log.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
 
     ++idx;
     handle->lastHeartbeatNs.store(
@@ -667,7 +668,7 @@ void captureWorker(const DeviceConfig &dev, const PublisherConfig &cfg,
   stopStream();
   freeMmap();
   close(fd);
-  LFL.info(
+  log.info(
       name,
       fmt::format("Capture worker stopped. Total frames published: {}", idx));
 }
@@ -734,8 +735,8 @@ void watchdogTick(std::vector<WorkerHandle> &handles,
 } // namespace
 
 int main(int argc, char **argv) {
-  auto &LFL = LockFreeLogger::getInstance();
-  LFL.initialize(std::make_unique<ConsoleAndFileLogWriter>(),
+  auto &log = LockFreeLogger::getInstance();
+  log.initialize(std::make_unique<ConsoleAndFileLogWriter>(),
                  QueueMode::IMMEDIATE);
 
   std::signal(SIGINT, onSignal);
@@ -744,10 +745,20 @@ int main(int argc, char **argv) {
   fs::path cfgPath =
       fs::path(argv[0]).parent_path() / "config/orbbec_publisher.yaml";
   std::vector<DeviceConfig> cliDevices;
+  std::vector<std::string> serialList;
   std::string cliFormat;
   uint32_t cliWidth = 0;
   uint32_t cliHeight = 0;
   bool listFormats = false;
+
+  auto parseCommaSeparated = [](const std::string &val,
+                                std::vector<std::string> &out) {
+    std::istringstream ss(val);
+    std::string token;
+    while (std::getline(ss, token, ','))
+      if (!token.empty())
+        out.push_back(token);
+  };
 
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -758,6 +769,10 @@ int main(int argc, char **argv) {
       d.path = argv[++i];
       d.name = argv[++i];
       cliDevices.emplace_back(d);
+    } else if (a.rfind("--serial=", 0) == 0) {
+      parseCommaSeparated(a.substr(9), serialList);
+    } else if (a == "--serial" && i + 1 < argc) {
+      parseCommaSeparated(argv[++i], serialList);
     } else if (a == "--format" && i + 1 < argc) {
       cliFormat = argv[++i];
     } else if (a == "--width" && i + 1 < argc) {
@@ -770,7 +785,9 @@ int main(int argc, char **argv) {
       std::cout
           << "Usage: " << argv[0] << " [OPTIONS]\n\n"
           << "Options:\n"
-          << "  --device <path> <name>  Capture from this V4L2 device "
+          << "  --serial <s1,s2,...>     Publish cameras matching these USB "
+             "serial numbers\n"
+          << "  --device <path> <name>   Capture from this V4L2 device "
              "(repeatable)\n"
           << "  --format <fmt>           Pixel format: MJPEG, YUYV, NV12 "
              "(default: MJPEG)\n"
@@ -784,14 +801,19 @@ int main(int argc, char **argv) {
              "directly\n"
           << "(no re-encoding) on the Orbbec/<name>/MJPEG iceoryx topic.\n"
           << "Raw formats are published on Orbbec/<name>/Frame.\n"
+          << "\nWhen using --serial the iceoryx topic name is the serial "
+             "number itself.\n"
+          << "Use --list-formats to discover serial numbers for attached "
+             "cameras.\n"
           << "\nExamples:\n"
           << "  " << argv[0] << " --list-formats\n"
-          << "  " << argv[0] << " --device /dev/video0 cam0 --list-formats\n"
+          << "  " << argv[0] << " --serial ABC123\n"
+          << "  " << argv[0] << " --serial=ABC123,DEF456 --format MJPEG\n"
           << "  " << argv[0] << " --device /dev/video0 cam0 --format MJPEG\n"
           << "  " << argv[0]
           << " --device /dev/video0 cam0 --format YUYV --width 1920 --height "
              "1080\n";
-      LFL.shutdown();
+      log.shutdown();
       return 0;
     }
   }
@@ -804,30 +826,64 @@ int main(int argc, char **argv) {
   if (cliHeight > 0)
     cfg.height = cliHeight;
 
+  // ── Resolve --serial to device paths ─────────────────────────────────
+  if (!serialList.empty()) {
+    auto allDevices = v4l2probe::scanDevices();
+    for (const auto &serial : serialList) {
+      bool matched = false;
+      for (const auto &dev : allDevices) {
+        if (dev.serial == serial) {
+          cliDevices.push_back({dev.path, serial});
+          log.info("publisher", fmt::format("serial {} → {} ({})", serial,
+                                            dev.path, dev.card));
+          matched = true;
+          break;
+        }
+      }
+      if (!matched)
+        log.warn("publisher",
+                 fmt::format("No device found with serial '{}' — skipping.",
+                             serial));
+    }
+    if (cliDevices.empty()) {
+      log.error("publisher",
+                "None of the requested serials were found. Exiting.");
+      log.shutdown();
+      return 1;
+    }
+  }
+
   const std::vector<DeviceConfig> &devices =
       !cliDevices.empty() ? cliDevices : cfg.devices;
 
   // ── --list-formats: probe each device and exit (no RouDi needed) ─────
   if (listFormats) {
-    // If no devices specified on CLI or config, scan /dev/video*
+    // Scan all devices so we can show serial numbers alongside paths
+    auto probed = v4l2probe::scanDevices();
     std::vector<DeviceConfig> probeList = devices;
     if (probeList.empty()) {
-      for (int n = 0; n < 16; ++n) {
-        std::string path = fmt::format("/dev/video{}", n);
-        if (fs::exists(path))
-          probeList.push_back({path, fmt::format("video{}", n)});
-      }
+      for (const auto &p : probed)
+        probeList.push_back({p.path, p.card});
     }
     if (probeList.empty()) {
-      LFL.error("publisher", "No V4L2 devices found under /dev/video*");
-      LFL.shutdown();
+      log.error("publisher", "No V4L2 devices found under /dev/video*");
+      log.shutdown();
       return 1;
     }
     for (const auto &d : probeList) {
-      LFL.info("publisher", fmt::format("=== {} ({}) ===", d.name, d.path));
+      std::string serial;
+      for (const auto &p : probed)
+        if (p.path == d.path) {
+          serial = p.serial;
+          break;
+        }
+      log.info("publisher",
+               fmt::format(
+                   "=== {} ({}){}===", d.name, d.path,
+                   serial.empty() ? " " : fmt::format(" serial={} ", serial)));
       int fd = open(d.path.c_str(), O_RDWR | O_NONBLOCK);
       if (fd < 0) {
-        LFL.error("publisher",
+        log.error("publisher",
                   fmt::format("Cannot open {}: {}", d.path, strerror(errno)));
         continue;
       }
@@ -835,31 +891,33 @@ int main(int argc, char **argv) {
       listDeviceFormats(fd, d.name);
       close(fd);
     }
-    LFL.shutdown();
+    log.shutdown();
     return 0;
   }
 
   // ── Device resolution: no devices on CLI or in config ────────────────
   std::vector<DeviceConfig> mutableDevices(devices.begin(), devices.end());
   if (mutableDevices.empty()) {
-    const bool hasCliOverrides = !cliFormat.empty() || cliWidth > 0 || cliHeight > 0;
+    const bool hasCliOverrides =
+        !cliFormat.empty() || cliWidth > 0 || cliHeight > 0;
     if (hasCliOverrides) {
-      // Non-interactive: CLI overrides present, auto-detect first available camera
+      // Non-interactive: CLI overrides present, auto-detect first available
+      // camera
       auto found = v4l2probe::scanDevices();
       if (found.empty()) {
-        LFL.error("publisher",
+        log.error("publisher",
                   "No --device specified and no V4L2 devices found. "
                   "Use --device <path> <name> or connect a camera.");
-        LFL.shutdown();
+        log.shutdown();
         return 1;
       }
       mutableDevices.push_back({found[0].path, "cam0"});
-      LFL.info("publisher",
-               fmt::format("Auto-detected: {} ({})", found[0].path, found[0].card));
+      log.info("publisher", fmt::format("Auto-detected: {} ({})", found[0].path,
+                                        found[0].card));
     } else {
       // Fully interactive: no args at all, walk the wizard
       if (!interactiveSetup(cfg, mutableDevices)) {
-        LFL.shutdown();
+        log.shutdown();
         return 1;
       }
     }
@@ -870,14 +928,14 @@ int main(int argc, char **argv) {
 
   const bool isMjpeg =
       (v4l2probe::fourccFromString(cfg.pixel_format) == V4L2_PIX_FMT_MJPEG);
-  LFL.info(
+  log.info(
       "publisher",
       fmt::format("{}x{} @ {} fps | format={} | topic={}", cfg.width,
                   cfg.height, cfg.fps, cfg.pixel_format,
                   isMjpeg ? "Orbbec/<name>/MJPEG" : "Orbbec/<name>/Frame"));
 
   for (size_t i = 0; i < mutableDevices.size(); ++i)
-    LFL.info("publisher",
+    log.info("publisher",
              fmt::format("  [{}] {} ({})", i, mutableDevices[i].name,
                          mutableDevices[i].path));
 
@@ -904,14 +962,14 @@ int main(int argc, char **argv) {
     watchdogTick(handles, futures, names, stats);
   }
 
-  LFL.info("publisher", "Shutdown signal received. Stopping workers.");
+  log.info("publisher", "Shutdown signal received. Stopping workers.");
   for (auto &h : handles)
     h.shouldStop.store(true);
   for (auto &f : futures)
     if (f.valid())
       f.get();
 
-  LFL.info("publisher", "All devices released. Exiting.");
-  LFL.shutdown();
+  log.info("publisher", "All devices released. Exiting.");
+  log.shutdown();
   return 0;
 }

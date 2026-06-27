@@ -41,12 +41,12 @@ void onSignal(int) { gRun.store(false); }
 void saverWorker(const std::string &name, const fs::path &outDir,
                  const std::string &timestamp, uint64_t chunkSize,
                  uint64_t segmentSizeBytes) {
-  auto &LFL = LockFreeLogger::getInstance();
+  auto &log = LockFreeLogger::getInstance();
   fs::path deviceDir = outDir / name;
   try {
     fs::create_directories(deviceDir);
   } catch (const std::exception &e) {
-    LFL.error(name, fmt::format("Cannot create output dir: {}", e.what()));
+    log.error(name, fmt::format("Cannot create output dir: {}", e.what()));
     return;
   }
 
@@ -64,10 +64,10 @@ void saverWorker(const std::string &name, const fs::path &outDir,
         makeSegmentPath(), "OrbbecVideo/" + name + "/MJPEG", chunkSize);
     try {
       writer->open();
-      LFL.info(name, fmt::format("Segment {} opened: {}", segIndex,
+      log.info(name, fmt::format("Segment {} opened: {}", segIndex,
                                  makeSegmentPath().string()));
     } catch (const std::exception &e) {
-      LFL.error(name, fmt::format("Failed to open segment: {}", e.what()));
+      log.error(name, fmt::format("Failed to open segment: {}", e.what()));
       return nullptr;
     }
     return writer;
@@ -87,7 +87,7 @@ void saverWorker(const std::string &name, const fs::path &outDir,
       options);
 
   subscriber.subscribe();
-  LFL.info(name,
+  log.info(name,
            fmt::format("Subscribed to Orbbec/{}/MJPEG. Waiting for frames...",
                        name));
 
@@ -103,13 +103,13 @@ void saverWorker(const std::string &name, const fs::path &outDir,
     auto subState = subscriber.getSubscriptionState();
     if (subState != lastState) {
       if (subState == iox::SubscribeState::SUBSCRIBED)
-        LFL.info(name, "Successfully subscribed.");
+        log.info(name, "Successfully subscribed.");
       lastState = subState;
     }
 
     if (segmentSizeBytes > 0 &&
         mcapWriter->bytes_written() >= segmentSizeBytes) {
-      LFL.info(name, fmt::format("Closing segment {} | frames={} | size={} MiB",
+      log.info(name, fmt::format("Closing segment {} | frames={} | size={} MiB",
                                  segIndex, mcapWriter->frames_written(),
                                  mcapWriter->bytes_written() / 1024 / 1024));
       mcapWriter->close();
@@ -170,20 +170,20 @@ void saverWorker(const std::string &name, const fs::path &outDir,
     }
 
     if (metrics.shouldReport(2.0))
-      LFL.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
+      log.info(name, fmt::format("[METRICS] {}", metrics.generateReport()));
 
     if (!gotAny)
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 
   mcapWriter->close();
-  LFL.info(name, fmt::format("Worker done. total_frames={}  segments={}",
+  log.info(name, fmt::format("Worker done. total_frames={}  segments={}",
                              frameIndex, segIndex));
 }
 
 int main(int argc, char **argv) {
-  auto &LFL = LockFreeLogger::getInstance();
-  LFL.initialize(std::make_unique<ConsoleAndFileLogWriter>(),
+  auto &log = LockFreeLogger::getInstance();
+  log.initialize(std::make_unique<ConsoleAndFileLogWriter>(),
                  QueueMode::IMMEDIATE);
 
   std::signal(SIGINT, onSignal);
@@ -208,7 +208,7 @@ int main(int argc, char **argv) {
                 << "       [--config <yaml>] [--out <dir>]\n"
                 << "Subscribes to iceoryx Orbbec/<name>/MJPEG and writes MCAP "
                    "(foxglove.CompressedImage, format=jpeg).\n";
-      LFL.shutdown();
+      log.shutdown();
       return 0;
     }
   }
@@ -230,15 +230,15 @@ int main(int argc, char **argv) {
         segmentSizeBytes =
             cfg["segment_size_gib"].as<uint64_t>() * 1024ULL * 1024 * 1024;
     } catch (const std::exception &e) {
-      LFL.warn("saver_gst",
+      log.warn("saver_gst",
                fmt::format("Could not load config ({}): {}. Using defaults.",
                            cfgPath.string(), e.what()));
     }
   }
 
   if (names.empty()) {
-    LFL.error("saver_gst", "No names specified. Use --name <name> or config.");
-    LFL.shutdown();
+    log.error("saver_gst", "No names specified. Use --name <name> or config.");
+    log.shutdown();
     return 1;
   }
 
@@ -250,7 +250,7 @@ int main(int argc, char **argv) {
   ts << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S");
   const std::string timestamp = ts.str();
 
-  LFL.info("saver_gst",
+  log.info("saver_gst",
            fmt::format("Recording {} camera(s) -> {}", names.size(), outDir));
 
   std::vector<std::thread> workers;
@@ -263,7 +263,7 @@ int main(int argc, char **argv) {
     if (t.joinable())
       t.join();
 
-  LFL.info("saver_gst", "Shutdown complete.");
-  LFL.shutdown();
+  log.info("saver_gst", "Shutdown complete.");
+  log.shutdown();
   return 0;
 }

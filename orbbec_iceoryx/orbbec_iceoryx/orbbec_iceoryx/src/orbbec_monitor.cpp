@@ -136,8 +136,8 @@ void renderDashboard(
 } // namespace
 
 int main(int argc, char **argv) {
-  auto &LFL = LockFreeLogger::getInstance();
-  LFL.initialize(std::make_unique<ConsoleAndFileLogWriter>(),
+  auto &log = LockFreeLogger::getInstance();
+  log.initialize(std::make_unique<ConsoleAndFileLogWriter>(),
                  QueueMode::IMMEDIATE);
 
   fs::path cfgPath =
@@ -153,14 +153,14 @@ int main(int argc, char **argv) {
       for (const auto &s : cfg["devices"])
         names.emplace_back(s.as<std::string>());
   } catch (const std::exception &e) {
-    LFL.warn("monitor", fmt::format("Could not load config ({}): {}",
+    log.warn("monitor", fmt::format("Could not load config ({}): {}",
                                     cfgPath.string(), e.what()));
   }
 
   if (names.empty()) {
-    LFL.error("monitor", "No devices found in config. "
+    log.error("monitor", "No devices found in config. "
                          "Add them to orbbec_saver.yaml under 'devices:'.");
-    LFL.shutdown();
+    log.shutdown();
     return 1;
   }
 
@@ -212,6 +212,6 @@ int main(int argc, char **argv) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
 
-  LFL.shutdown();
+  log.shutdown();
   return 0;
 }
