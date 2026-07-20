@@ -1,41 +1,51 @@
-# lucid_iceoryx
+# orbbec_iceoryx
 
-Lucid Vision camera -> iceoryx shared memory -> MCAP pipeline. Discovers Lucid
-cameras, publishes BayerRG8 frames over zero-copy shared memory, and writes
-timestamped segmented MCAP files readable in Foxglove. Includes optional
-GStreamer-based MJPEG capture path and a live health monitor dashboard.
-
-```
-lucid_publisher  ->  [iceoryx "Lucid/SN<serial>/Frame"]   ->  lucid_saver   ->  .mcap files
-                 ->  [iceoryx "Lucid/SN<serial>/Health"]  ->  lucid_monitor
-lucid_saver      ->  [iceoryx "Lucid/SN<serial>/SaverStats"] -> lucid_monitor
-```
-
-- **lucid_publisher** — discovers cameras, applies per-camera fps/exposure/gain
-  from YAML (or loads a saved UserSet via `--userset`), publishes BayerRG8
-  frames over iceoryx. Optional MJPEG HTTP preview of the first camera
-  (`--mjpeg`). Publishes per-second health stats. Watchdog detects stalled
-  streams and auto-resets them.
-- **lucid_saver** — subscribes to frame topics by serial, writes segmented
-  `.mcap` files per camera. Publishes live saver stats (fps, latency, segment
-  info) to the monitor.
-- **lucid_monitor** — live dashboard showing publisher health (fps, exposure,
-  gain, loan failures, errors) and saver stats (save fps, write latency,
-  segment size) per camera.
-- **lucid_mock_publisher** — synthetic BayerRG8 frames, no camera or Arena SDK
-  needed. Used to validate the saver and MCAP output in isolation.
-- **lucid_viewer** — OpenCV window showing a live iceoryx frame feed.
-
-### GStreamer MJPEG pipeline (optional, Jetson only)
-
-Separate path using hardware JPEG encoding. Does not use iceoryx.
+V4L2 camera → iceoryx shared memory → MCAP pipeline. Captures from any V4L2/UVC
+camera (raw YUYV/NV12 or passthrough MJPEG), publishes frames over zero-copy
+shared memory, and writes timestamped segmented MCAP files readable in
+Foxglove. Includes a GStreamer-based hardware MJPEG path and a live health
+monitor dashboard.
 
 ```
-lucid_gst_publisher -> shmsink (/tmp/lucid-mjpeg-<serial>.sock) -> lucid_saver_gst -> .mcap
-                    -> HTTP MJPEG (base_http_port + camera_index)
+orbbec_publisher  →  [iceoryx "Orbbec/<name>/Frame"]   →  orbbec_saver   →  .mcap files
+                  →  [iceoryx "Orbbec/<name>/Health"]  →  orbbec_monitor
+orbbec_saver      →  [iceoryx "Orbbec/<name>/SaverStats"] → orbbec_monitor
 ```
 
-Built only if GStreamer >= 1.18 is found at configure time.
+- **orbbec_publisher** — opens V4L2 devices (by path or by USB serial),
+  publishes frames over iceoryx. If the camera outputs MJPEG natively the
+  compressed frames are forwarded as-is on the `MJPEG` topic (no
+  re-encoding); raw formats (YUYV, NV12) go out on the `Frame` topic.
+  Publishes per-second health stats. `--list-formats` probes attached
+  cameras without needing RouDi running.
+- **orbbec_saver** — subscribes to `Frame` topics by device name, writes
+  segmented `.mcap` files per camera. Publishes live saver stats (fps,
+  latency, segment info) to the monitor.
+- **orbbec_monitor** — live dashboard showing publisher health (fps,
+  resolution, loan failures, errors) and saver stats (save fps, write
+  latency, segment size) per camera.
+- **orbbec_mock_publisher** — synthetic frames, no camera needed. Used to
+  validate the saver and MCAP output in isolation.
+- **orbbec_viewer** — OpenCV window showing a live iceoryx frame feed.
+
+### GStreamer MJPEG pipeline (optional)
+
+Separate path using hardware JPEG encoding where available.
+
+```
+orbbec_gst_publisher → [iceoryx "Orbbec/<name>/MJPEG"] → orbbec_saver_gst → .mcap
+                     → HTTP MJPEG server (--stream)
+```
+
+Encoder backend is auto-detected (override with `--jetson` / `--cpu`):
+Jetson `nvvidconv`+`nvjpegenc` → desktop NVIDIA `nvjpegenc` → software
+`jpegenc`. If the camera already outputs MJPEG, frames pass through
+undecoded. `orbbec_saver_gst` writes MCAP using the `foxglove.CompressedImage`
+schema. Built only if GStreamer ≥ 1.18 is found at configure time.
+
+`--raw-stream <socket>` additionally exposes raw NV12/RGB frames over a
+`nvunixfdsink` Unix socket (Jetson) for live preview with `scripts/raw_viewer.py`,
+without touching the MCAP/MJPEG path.
 
 ---
 
@@ -43,12 +53,11 @@ Built only if GStreamer >= 1.18 is found at configure time.
 
 | Dependency | Version | Notes |
 |---|---|---|
-| Arena SDK | 0.1.x | Vendor binary from Lucid Vision Labs |
 | iceoryx | 2.95.8 | Built from source |
-| MCAP | -- | Fetched automatically by CMake |
+| MCAP | -- | Fetched automatically by CMake (`FetchContent`) |
 | fmt, yaml-cpp | system | `apt install` |
 | OpenCV | system | core, imgcodecs, imgproc, highgui, videoio |
-| GStreamer | >= 1.18 (optional) | Enables `lucid_gst_publisher` / `lucid_saver_gst` |
+| GStreamer | >= 1.18 (optional) | Enables `orbbec_gst_publisher` / `orbbec_saver_gst` |
 | CMake | >= 3.16 | |
 | Compiler | C++20 | gcc >= 10 |
 
@@ -57,26 +66,13 @@ sudo apt install -y build-essential cmake git \
     libfmt-dev libyaml-cpp-dev libacl1-dev libncurses-dev \
     libopencv-dev \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-    python3-colcon-common-extensions python3-yaml
+    python3-yaml
 ```
 
-### 1. Install the Arena SDK
+No vendor camera SDK is required — capture goes through the standard V4L2
+kernel API, so any UVC-compliant camera works.
 
-Download from [Lucid's downloads hub](https://thinklucid.com/downloads-hub/).
-
-**x86_64:**
-```bash
-tar -xvzf ArenaSDK_v0.1.x_Linux_x64.tar.gz
-cd ArenaSDK_Linux_x64 && sudo sh Arena_SDK_Linux_x64.conf
-```
-
-**ARM64 (Jetson AGX Orin):**
-```bash
-tar -xvzf ArenaSDK_v0.1.x_Linux_ARM64.tar.gz
-cd ArenaSDK_Linux_ARM64 && sudo sh Arena_SDK_ARM64.conf
-```
-
-### 2. Build and install iceoryx (2.95.8)
+### Build and install iceoryx (2.95.8)
 
 ```bash
 git clone https://github.com/eclipse-iceoryx/iceoryx.git
@@ -90,192 +86,182 @@ cmake --build build --target install -j$(nproc)
 ## Build
 
 ```bash
-colcon build
+./build.sh
 ```
 
-CMake auto-detects x86_64 vs ARM64 and selects the correct Arena SDK paths.
-Default `ARENA_SDK_ROOT`: x86_64 → `/home/eric/ArenaSDK_Linux_x64`,
-ARM64 → `/home/eric/ArenaSDK_Linux_ARM64`. Override with:
+which runs:
 
 ```bash
-colcon build --cmake-args -DARENA_SDK_ROOT=/path/to/ArenaSDK
+cmake -B build -S orbbec_iceoryx/orbbec_iceoryx -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build
 ```
+
+Binaries land in `build/`. Config YAML files are copied next to them at
+build time from `orbbec_iceoryx/orbbec_iceoryx/config/`.
+
 ---
 
 ## Run (iceoryx pipeline)
 
 **Terminal 1 — RouDi:**
 ```bash
-iox-roudi -c iox_config.toml
+iox-roudi -c orbbec_iceoryx/orbbec_iceoryx/iox_config.toml
 ```
 
 **Terminal 2 — Publisher:**
 ```bash
-./build/lucid_iceoryx/lucid_publisher
+./build/orbbec_publisher
 ```
 
 Flags:
 ```
---serial <SN>            capture only this camera (repeatable)
---userset <name>         load a saved camera UserSet (UserSet1/2/3)
---config <path>          override YAML config path
---mjpeg                  enable MJPEG HTTP preview on first camera
---mjpeg-port <N>         MJPEG port (default: 8080)
---mjpeg-quality <0-100>  JPEG quality (default: 85)
+--serial <s1,s2,...>     publish cameras matching these USB serial numbers
+--device <path> <name>   capture from this V4L2 device (repeatable)
+--format <fmt>           pixel format: MJPEG, YUYV, NV12 (default: MJPEG)
+--width  <px>            frame width  (default: from config)
+--height <px>            frame height (default: from config)
+--list-formats           print supported formats for each device and exit
+--config <path>          YAML config (default: config/orbbec_publisher.yaml)
 ```
 
-With `--userset`, fps/exposure/gain/resolution come from the camera's stored
-UserSet instead of the YAML values. Use `set_camera_params --userset <name>`
-to save a UserSet first.
-
-With `--mjpeg`, point a browser or VLC at `http://<host>:8080/` for a live
-preview of the first camera while recording.
+With `--serial`, the iceoryx instance name is the serial number itself. Use
+`--list-formats` to discover serials/formats for attached cameras (no RouDi
+needed for this).
 
 **Terminal 3 — Saver:**
 ```bash
-./build/lucid_iceoryx/lucid_saver
+./build/orbbec_saver
 ```
 
 Flags:
 ```
---serial <SN>   record only this camera (repeatable, overrides config)
+--name <name>   record only this device (repeatable, overrides config)
 --config <path> override YAML config path
 ```
 
-Output: `<output_dir>/<serial>/<YYYYMMDD_HHMMSS>_seg001.mcap`, `_seg002.mcap`, ...
+Output: `<output_dir>/<name>/<YYYYMMDD_HHMMSS>_seg001.mcap`, `_seg002.mcap`, ...
 
 **Terminal 4 — Monitor (optional):**
 ```bash
-./build/lucid_iceoryx/lucid_monitor
+./build/orbbec_monitor
 ```
 
-Reads serials from `config/lucid_saver.yaml`. Refreshes every 500ms showing:
-
-```
-  SN254400443  ● OK
-    pub  fps=89.7  exp=10000us  gain=0.00dB  1440x1080
-         published=53820  loan_failures=0  resets=0
-    sav  fps=89.5  saved=53810  seg=2  seg_size=847 MiB  write=0.12ms  e2e=3.4ms
-```
+Reads device names from `config/orbbec_saver.yaml`. Refreshes every 500ms
+showing publisher fps/resolution/loan failures and saver fps/write
+latency/segment size per camera.
 
 ---
 
 ## Validation without a camera
 
 ```bash
-iox-roudi -c iox_config.toml
-./build/lucid_iceoryx/lucid_mock_publisher 254400443 254400442
-./build/lucid_iceoryx/lucid_saver
-./build/lucid_iceoryx/lucid_monitor   # optional
-python3 scripts/check_mcap.py 254400443
+iox-roudi -c orbbec_iceoryx/orbbec_iceoryx/iox_config.toml
+./build/orbbec_mock_publisher cam0 cam1
+./build/orbbec_saver
+./build/orbbec_monitor   # optional
+python3 orbbec_iceoryx/orbbec_iceoryx/scripts/check_mcap.py data/cam0/<file>.mcap
 ```
 
 ### Benchmark runs
 
 ```bash
-python3 scripts/bench_launch.py                                    # mock, 10s
-python3 scripts/bench_launch.py --real --serial 254400443 --duration 30
-python3 scripts/bench_launch.py --duration 0                       # indefinite
+python3 orbbec_iceoryx/orbbec_iceoryx/scripts/bench_launch.py
 ```
 
 ---
 
 ## Run (GStreamer MJPEG pipeline)
 
-No RouDi needed. Jetson only (`nvjpegenc`).
-
 ```bash
-./build/lucid_iceoryx/lucid_gst_publisher --serial 254400443
-./build/lucid_iceoryx/lucid_saver_gst --serial 254400443
+./build/orbbec_gst_publisher --device /dev/video0 --name cam0 --stream
+./build/orbbec_saver_gst --name cam0
 ```
 
-HTTP MJPEG preview on `base_http_port + camera_index` (default 9000, 9001, ...).
-MCAP uses `foxglove.CompressedVideo` schema — plays directly in Foxglove.
-
----
-
-## Camera parameter scripts
-
-```bash
-# Apply settings + optionally save to a UserSet
-./build/lucid_iceoryx/set_camera_params
-./build/lucid_iceoryx/set_camera_params --userset UserSet2
-
-# Verify what a UserSet contains
-./build/lucid_iceoryx/verify_userset --userset UserSet2
-./build/lucid_iceoryx/verify_userset   # current live values
+Flags (`orbbec_gst_publisher`):
 ```
+--device      <path>   V4L2 device (default: interactive picker)
+--name        <str>    stream name / iceoryx instance
+--format      <fmt>    MJPEG for passthrough, omit for encode
+--width       <px>     capture width  (default: 1280)
+--height      <px>     capture height (default: 720)
+--fps         <n>      frame rate (default: 30)
+--quality     <1-100>  JPEG quality for encoding (default: 85)
+--port        <n>      HTTP MJPEG server port (default: 9000)
+--jetson               force Jetson nvvidconv+nvjpegenc
+--cpu                  force jpegenc (software)
+--stream               enable HTTP MJPEG server
+--raw-stream  <path>   enable nvunixfdsink raw NV12/RGB branch (Jetson)
+```
+
+With `--stream`, point a browser or VLC at `http://<host>:<port>/` for a live
+preview while recording.
+
+Flags (`orbbec_saver_gst`):
+```
+--name <name>    device to record (repeatable)
+--config <path>  YAML config
+--out <dir>      override output directory
+```
+
+MCAP uses the `foxglove.CompressedImage` schema — plays directly in Foxglove.
 
 ---
 
 ## Configuration
 
-### `config/lucid_publisher.yaml`
+### `config/orbbec_publisher.yaml`
 
 | Key | Default | Description |
 |---|---|---|
-| `serials` | `[254400443, 254400442]` | Cameras to connect to |
-| `width` | 1440 | Requested camera width |
-| `height` | 1080 | Requested camera height |
-| `fps` | 90 | Target frame rate |
-| `exposure_time_us` | 10000 | Exposure in microseconds — must be < `(1/fps)*1e6` |
-| `gain_db` | 0.0 | Gain in dB (0 = minimum noise) |
-| `image_timeout_ms` | 2000 | `GetImage()` timeout |
+| `devices` | `[{path: /dev/video0, name: cam0}, {path: /dev/video2, name: cam1}]` | V4L2 devices to capture from |
+| `width` | 1280 | Requested camera width |
+| `height` | 720 | Requested camera height |
+| `fps` | 30 | Target frame rate |
+| `pixel_format` | YUYV | `YUYV` (packed 4:2:2) or `MJPEG` (hardware-compressed) |
+| `image_timeout_ms` | 2000 | Frame read timeout |
 | `queue_capacity` | 500 | Internal publisher queue depth |
-| `log_dir` | `/home/eric/lucid_iceoryx/logs` | Mission log directory |
 
-These values are ignored when `--userset` is passed.
+The device `name` is used as the iceoryx instance identifier and can be
+overridden per-device with `--device <path> <name>`.
 
-**Per-camera overrides:**
-```yaml
-camera_overrides:
-  "254400442":
-    exposure_time_us: 12000.0
-    fps: 60
-```
-
-### `config/lucid_saver.yaml`
+### `config/orbbec_saver.yaml`
 
 | Key | Default | Description |
 |---|---|---|
-| `serials` | `[254400443, 254400442]` | Cameras to record |
+| `devices` | `["cam0", "cam1"]` | Device names to subscribe to (must match publisher names) |
 | `output_dir` | `data` | Root directory for `.mcap` output |
 | `chunk_size_mib` | 128 | MCAP chunk size |
 | `segment_size_gib` | 1 | Roll to new file at this size (0 = disable) |
 
-**Expected segment sizes per camera:**
+### `config/orbbec_gst_publisher.yaml`
 
-| fps | 1 GiB | 5 GiB | 10 GiB |
-|---|---|---|---|
-| 30fps | ~11 min | ~55 min | ~110 min |
-| 60fps | ~5.5 min | ~27 min | ~55 min |
-| 90fps | ~3.7 min | ~18 min | ~37 min |
+| Key | Default | Description |
+|---|---|---|
+| `device` | `/dev/video0` | V4L2 device path |
+| `name` | `cam0` | Stream name — iceoryx instance `Orbbec/<name>/MJPEG` |
+| `width` / `height` / `fps` | 1280 / 720 / 30 | Capture resolution and rate |
+| `quality` | 85 | MJPEG encoder quality (1-100) |
+| `http_port` | 9000 | HTTP MJPEG server port |
 
 ### `iox_config.toml`
 
-Sized for 1440×1080 BayerRG8 (2 cameras, 16GB RAM):
-```toml
-size  = 2097152   # 2 MiB per frame
-count = 300       # 600 MB total
-```
-
-If you change resolution: `size = round_up(40 + W×H×1 + 48, 64)`
-
-Use `common_config.toml` when running the Lucid and MechMind pipelines
-together.
+Sized for RGB8/YUYV frames up to ~2448×2048 (2 MiB pool, count 300 ≈ 600 MB).
+See the comments in the file for the sizing formula if resolution changes.
+`common_config.toml` is an alternate RouDi profile for running alongside
+other iceoryx publishers (larger combined pool) — pass it with `iox-roudi -c`
+if it fits your setup.
 
 ---
 
 ## Performance metrics
 
-**Publisher** (`PublisherMetrics`) — logged every 2 seconds per camera:
-fps, throughput MB/s, software latency avg/min/max, frame jitter, camera drops,
-loan failures.
+**Publisher** — logged every 2 seconds per camera: fps, resolution, loan
+failures, watchdog resets, errors. Also streamed live to `orbbec_monitor` via
+the `Health` topic (`orbbec::HealthMsg`).
 
-**Saver** (`SubscriberMetrics`) — logged every 2 seconds per camera:
-receive fps, write latency avg/min/max, end-to-end latency, transmission drops.
-
-Both are also streamed live to `lucid_monitor` via iceoryx health topics.
+**Saver** — logged every 2 seconds per camera: save fps, write latency,
+end-to-end latency, throughput, transmission drops, current segment.
+Streamed live via the `SaverStats` topic (`orbbec::SaverStatsMsg`).
 
 ---
 
@@ -283,13 +269,30 @@ Both are also streamed live to `lucid_monitor` via iceoryx health topics.
 
 | Binary | Service | Instance | Event |
 |---|---|---|---|
-| lucid_publisher | `Lucid` | `SN<serial>` | `Frame` |
-| lucid_publisher | `Lucid` | `SN<serial>` | `Health` |
-| lucid_saver | `Lucid` | `SN<serial>` | `SaverStats` |
-| lucid_saver | subscribes | `SN<serial>` | `Frame` |
-| lucid_monitor | subscribes | `SN<serial>` | `Health` + `SaverStats` |
+| orbbec_publisher | `Orbbec` | `<name>` | `Frame` (raw) |
+| orbbec_publisher | `Orbbec` | `<name>` | `MJPEG` (passthrough) |
+| orbbec_publisher | `Orbbec` | `<name>` | `Health` |
+| orbbec_saver | subscribes | `<name>` | `Frame` |
+| orbbec_saver | `Orbbec` | `<name>` | `SaverStats` |
+| orbbec_gst_publisher | `Orbbec` | `<name>` | `MJPEG` |
+| orbbec_saver_gst | subscribes | `<name>` | `MJPEG` |
+| orbbec_monitor | subscribes | `<name>` | `Health` + `SaverStats` |
 
-The GStreamer pipeline uses Unix sockets (`/tmp/lucid-mjpeg-<serial>.sock`),
-not iceoryx — it runs independently of the above.
+`<name>` is either the device name from config/`--device`, or the USB serial
+number when `--serial` is used.
 
 ---
+
+## Repo layout
+
+```
+orbbec_iceoryx/
+├── common_config.toml                       # alternate RouDi pool profile
+└── orbbec_iceoryx/                          # CMake project
+    ├── CMakeLists.txt
+    ├── cmake/dependencies.cmake             # FetchContent for MCAP
+    ├── config/                              # per-binary YAML defaults
+    ├── include/                             # shared headers (iceoryx message structs, loggers, mcap writers, v4l2 probe)
+    ├── src/                                 # publisher/saver/monitor/gst binaries
+    └── scripts/                             # orbbec_viewer, raw_viewer.py, bench_launch.py, check_mcap.py
+```
