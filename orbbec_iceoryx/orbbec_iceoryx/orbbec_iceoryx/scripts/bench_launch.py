@@ -48,10 +48,10 @@ def cleanup_processes(signum=None, frame=None):
             except Exception as e:
                 log_warn(f"Failed to kill process: {e}")
     processes.clear()
-    
+
     # Also ensure iox-roudi is stopped
     subprocess.run(["pkill", "-9", "iox-roudi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["pkill", "-9", "lucid_"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["pkill", "-9", "orbbec_"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if signum is not None:
         sys.exit(0)
 
@@ -60,7 +60,7 @@ signal.signal(signal.SIGINT, cleanup_processes)
 signal.signal(signal.SIGTERM, cleanup_processes)
 
 def main():
-    parser = argparse.ArgumentParser(description="Lucid Iceoryx Pipeline Benchmark Launcher")
+    parser = argparse.ArgumentParser(description="Orbbec Iceoryx Pipeline Benchmark Launcher")
     parser.add_argument("--mock", action="store_true", default=True, help="Use mock publisher (default: True)")
     parser.add_argument("--real", dest="mock", action="store_false", help="Use real camera publisher")
     parser.add_argument("--serial", type=str, default="sncam001", help="Camera serial number (default: sncam001)")
@@ -72,30 +72,30 @@ def main():
 
     # Find workspace root dynamically relative to this script's directory
     script_path = Path(__file__).resolve()
-    # Path is: <workspace_dir>/lucid_iceoryx/lucid_iceoryx/scripts/bench_launch.py
+    # Path is: <workspace_dir>/orbbec_iceoryx/orbbec_iceoryx/scripts/bench_launch.py
     workspace_dir = script_path.parents[3]
     package_dir = script_path.parents[1]
-    
+
     # Locate binaries
-    bin_dir = workspace_dir / "install" / "lucid_iceoryx" / "bin"
-    pub_binary = bin_dir / ("lucid_mock_publisher" if args.mock else "lucid_publisher")
-    saver_binary = bin_dir / "lucid_saver"
+    bin_dir = workspace_dir / "install" / "orbbec_iceoryx" / "bin"
+    pub_binary = bin_dir / ("orbbec_mock_publisher" if args.mock else "orbbec_publisher")
+    saver_binary = bin_dir / "orbbec_saver"
     
     if not pub_binary.exists() or not saver_binary.exists():
         log_error("Binaries not found. Please compile the workspace first by running 'bash build.sh'")
         sys.exit(1)
 
     # 1. Terminate any stale processes
-    log_info("Cleaning up any existing RouDi or Lucid processes...")
+    log_info("Cleaning up any existing RouDi or Orbbec processes...")
     subprocess.run(["pkill", "-9", "iox-roudi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["pkill", "-9", "lucid_"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["pkill", "-9", "orbbec_"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 2. Setup benchmark specific configurations
     bench_config_dir = workspace_dir / "bench_config"
     bench_config_dir.mkdir(exist_ok=True)
-    
-    pub_cfg_path = bench_config_dir / "lucid_publisher_bench.yaml"
-    sub_cfg_path = bench_config_dir / "lucid_saver_bench.yaml"
+
+    pub_cfg_path = bench_config_dir / "orbbec_publisher_bench.yaml"
+    sub_cfg_path = bench_config_dir / "orbbec_saver_bench.yaml"
     out_data_dir = workspace_dir / "bench_data"
     out_data_dir.mkdir(exist_ok=True)
     
@@ -156,7 +156,7 @@ def main():
     processes.append(pub_proc)
 
     # 5. Start Saver (Subscriber)
-    log_info("Starting subscriber: lucid_saver...")
+    log_info("Starting subscriber: orbbec_saver...")
     sub_cmd = [str(saver_binary), "--config", str(sub_cfg_path)]
     sub_proc = subprocess.Popen(
         sub_cmd,

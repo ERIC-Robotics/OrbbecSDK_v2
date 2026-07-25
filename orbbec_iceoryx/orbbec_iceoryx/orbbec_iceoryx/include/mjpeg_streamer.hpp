@@ -17,7 +17,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
-namespace lucid {
+namespace orbbec {
 
 struct MjpegStreamTimes {
   double demosaicMs;
@@ -185,4 +185,4 @@ private:
   uint64_t currentFrameId_;
 };
 
-} // namespace lucid
+} // namespace orbbec

@@ -1,5 +1,7 @@
 # orbbec_iceoryx
 
+![alt text](docs/system-diagram.png)
+
 V4L2 camera → iceoryx shared memory → MCAP pipeline. Captures from any V4L2/UVC
 camera (raw YUYV/NV12 or passthrough MJPEG), publishes frames over zero-copy
 shared memory, and writes timestamped segmented MCAP files readable in
@@ -24,9 +26,12 @@ orbbec_saver      →  [iceoryx "Orbbec/<name>/SaverStats"] → orbbec_monitor
 - **orbbec_monitor** — live dashboard showing publisher health (fps,
   resolution, loan failures, errors) and saver stats (save fps, write
   latency, segment size) per camera.
-- **orbbec_mock_publisher** — synthetic frames, no camera needed. Used to
-  validate the saver and MCAP output in isolation.
-- **orbbec_viewer** — OpenCV window showing a live iceoryx frame feed.
+- **orbbec_mock_publisher** — generates synthetic frames without a camera.
+  Used for benchmarking and validating the saver/MCAP pipeline in isolation.
+  Optionally integrated into `bench_launch.py` for automated end-to-end runs.
+- **orbbec_viewer** — OpenCV window showing live frames from iceoryx or HTTP.
+  Modes: raw frames (default), iceoryx MJPEG (`--mjpeg`), or HTTP MJPEG stream
+  (`--mjpeg-stream` for remote viewing via `orbbec_gst_publisher --stream`).
 
 ### GStreamer MJPEG pipeline (optional)
 
@@ -84,13 +89,6 @@ cmake --build build --target install -j$(nproc)
 ---
 
 ## Build
-
-```bash
-./build.sh
-```
-
-which runs:
-
 ```bash
 cmake -B build -S orbbec_iceoryx/orbbec_iceoryx -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build
@@ -150,9 +148,29 @@ Reads device names from `config/orbbec_saver.yaml`. Refreshes every 500ms
 showing publisher fps/resolution/loan failures and saver fps/write
 latency/segment size per camera.
 
+**Terminal 5 — Viewer (optional):**
+```bash
+./build/orbbec_viewer --name cam0
+```
+
+Flags:
+```
+--name <name>       camera device name (default: cam0)
+--mjpeg             subscribe to iceoryx MJPEG topic instead of raw frames
+--mjpeg-stream      connect to HTTP MJPEG server (for remote viewing)
+--mjpeg-url <url>   HTTP stream URL (default: http://localhost:9000/)
+```
+
+Three viewing modes:
+- **Raw frames** (default) — zero-copy iceoryx `Frame` subscription, YUYV→BGR conversion in OpenCV
+- **MJPEG over iceoryx** (`--mjpeg`) — bandwidth-efficient, subscribes to `MJPEG` topic
+- **HTTP MJPEG** (`--mjpeg-stream`) — remote viewing over network, requires `orbbec_gst_publisher --stream`
+
 ---
 
 ## Validation without a camera
+
+**Manual validation** — start each component separately:
 
 ```bash
 iox-roudi -c orbbec_iceoryx/orbbec_iceoryx/iox_config.toml
@@ -162,11 +180,24 @@ iox-roudi -c orbbec_iceoryx/orbbec_iceoryx/iox_config.toml
 python3 orbbec_iceoryx/orbbec_iceoryx/scripts/check_mcap.py data/cam0/<file>.mcap
 ```
 
-### Benchmark runs
+**Automated benchmark** — launch, run, and validate in one script:
 
 ```bash
 python3 orbbec_iceoryx/orbbec_iceoryx/scripts/bench_launch.py
 ```
+
+Flags:
+```
+--mock              use synthetic publisher (default: True)
+--real              use real camera publisher
+--serial <name>     camera serial or mock name (default: sncam001)
+--duration <s>      run time in seconds; 0 = indefinite (default: 10)
+--fps <n>           target frame rate (default: 90)
+--width <px>        frame width (default: 1440)
+--height <px>       frame height (default: 1080)
+```
+
+The script automates RouDi startup, spawns publisher and saver, streams live metrics (fps, latency, errors), and validates the recorded MCAP on completion.
 
 ---
 
@@ -288,11 +319,17 @@ number when `--serial` is used.
 ```
 orbbec_iceoryx/
 ├── common_config.toml                       # alternate RouDi pool profile
+├── laptop_config.toml                       # reduced-footprint RouDi profile
 └── orbbec_iceoryx/                          # CMake project
     ├── CMakeLists.txt
     ├── cmake/dependencies.cmake             # FetchContent for MCAP
     ├── config/                              # per-binary YAML defaults
     ├── include/                             # shared headers (iceoryx message structs, loggers, mcap writers, v4l2 probe)
     ├── src/                                 # publisher/saver/monitor/gst binaries
-    └── scripts/                             # orbbec_viewer, raw_viewer.py, bench_launch.py, check_mcap.py
+    ├── iox_config.toml                      # default RouDi shared memory config
+    └── scripts/
+        ├── bench_launch.py                  # automated end-to-end benchmark launcher
+        ├── check_mcap.py                    # MCAP validation and frame statistics
+        ├── raw_viewer.py                    # live frame preview over Unix socket (Jetson)
+        └── orbbec_viewer                    # OpenCV window showing live iceoryx feed
 ```

@@ -95,9 +95,10 @@ Makefile
 data/
 *.mcap
 
+# ── Mission logs ─────────────────────────────────────────────────────────────
+orbbec_iceoryx/orbbec_iceoryx/log/
+
 # ── Camera parameter script outputs ─────────────────────────────────────────
-# Compiled binaries from lucid_camera_parameter_scripts (built in-place inside
-# the Arena SDK directory).
 set_camera_params
 verify_userset
 

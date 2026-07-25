@@ -25,13 +25,13 @@ struct VideoFrameData {
 // foxglove.CompressedVideo protobuf schema.
 //
 // Usage:
-//   VideoMcapWriter w("out.mcap", "LucidVideo/SN12345/MJPEG", 64*1024*1024);
+//   VideoMcapWriter w("out.mcap", "OrbbecVideo/SN12345/MJPEG", 64*1024*1024);
 //   w.open();
 //   w.write_frame_raw(&hdr, data_ptr, data_size);   // per-frame
 //   w.close();
 class VideoMcapWriter {
 public:
-    // topic     : MCAP channel topic (e.g. "LucidVideo/SN12345/MJPEG")
+    // topic     : MCAP channel topic (e.g. "OrbbecVideo/SN12345/MJPEG")
     // chunk_size: MCAP chunk size in bytes (default 64 MiB)
     // frame_id  : foxglove CompressedVideo frame_id field (defaults to topic)
     explicit VideoMcapWriter(std::filesystem::path output_path,
