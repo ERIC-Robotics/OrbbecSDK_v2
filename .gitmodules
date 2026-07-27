@@ -1,0 +1,3 @@
+[submodule "orbbec_iceoryx/orbbec_iceoryx/orbbec_iceoryx/extern/mcap_builder"]
+	path = orbbec_iceoryx/orbbec_iceoryx/orbbec_iceoryx/extern/mcap_builder
+	url = https://github.com/ERIC-Robotics/mcap_builder.git
